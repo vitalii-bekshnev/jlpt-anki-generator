@@ -1,0 +1,454 @@
+name: Build and Release JLPT Anki Decks
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 1 * *'
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'scripts/**'
+      - 'generate_general_decks.sh'
+      - '.github/workflows/build-and-release.yml'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+
+    - name: Get latest release from jmdict-simplified
+      id: get_release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        LATEST_RELEASE=$(curl -s -H "Authorization: token $GH_TOKEN" https://api.github.com/repos/scriptin/jmdict-simplified/releases/latest | jq -r '.tag_name')
+        if [ -z "$LATEST_RELEASE" ] || [ "$LATEST_RELEASE" = "null" ]; then
+          echo "ERROR: Failed to fetch latest release"
+          exit 1
+        fi
+        echo "Latest release: $LATEST_RELEASE"
+        # Sanitize: remove any characters that could cause shell injection
+        SANITIZED_VERSION=$(echo "$LATEST_RELEASE" | tr -cd '[:alnum:].-_')
+        echo "release_tag=$SANITIZED_VERSION" >> $GITHUB_OUTPUT
+
+    - name: Check if release already exists
+      id: check_existing
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        RELEASE_TAG="${{ steps.get_release.outputs.release_tag }}"
+        # Check if we already have a release for this version
+        EXISTING_RELEASE=$(curl -s -H "Authorization: token $GH_TOKEN" \
+          "https://api.github.com/repos/${{ github.repository }}/releases/tags/${RELEASE_TAG}-1" | \
+          jq -r '.tag_name // empty')
+        
+        if [ -n "$EXISTING_RELEASE" ]; then
+          echo "Release already exists for version $RELEASE_TAG"
+          echo "should_skip=true" >> $GITHUB_OUTPUT
+        else
+          echo "No existing release found for $RELEASE_TAG - proceeding"
+          echo "should_skip=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Skip if already released
+      if: steps.check_existing.outputs.should_skip == 'true'
+      run: |
+        echo "Skipping workflow - release already exists for this version"
+        exit 0
+
+    - name: Cache dictionary files
+      uses: actions/cache@v4
+      with:
+        path: |
+          jmdict-eng-*.json
+          jmdict-examples-eng-*.json
+          kanjidic2-en-*.json
+        key: dict-${{ steps.get_release.outputs.release_tag }}-${{ hashFiles('.github/workflows/build-and-release.yml') }}
+        restore-keys: |
+          dict-${{ steps.get_release.outputs.release_tag }}-
+
+    - name: Download dictionary files
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -e
+        RELEASE_TAG="${{ steps.get_release.outputs.release_tag }}"
+        echo "Downloading files from release: $RELEASE_TAG"
+
+        # Get download URLs for specific files
+        URLS=$(curl -s -H "Authorization: token $GH_TOKEN" "https://api.github.com/repos/scriptin/jmdict-simplified/releases/tags/$RELEASE_TAG" | \
+          jq -r '.assets[] | select(.name | test("jmdict-eng-.*\\.zip$|jmdict-examples-eng-.*\\.zip$|kanjidic2-en-.*\\.zip$")) | .browser_download_url')
+        
+        if [ -z "$URLS" ]; then
+          echo "ERROR: No matching files found in release"
+          exit 1
+        fi
+        
+        # Download files with proper error handling
+        FAILED=0
+        for url in $URLS; do
+          if [ -n "$url" ]; then
+            echo "Downloading: $url"
+            wget --progress=bar:force:noscroll -O "$(basename "$url")" "$url" || {
+              echo "ERROR: Failed to download $url"
+              FAILED=1
+              break
+            }
+          fi
+        done
+        
+        if [ "$FAILED" -eq 1 ]; then
+          exit 1
+        fi
+
+        echo "Downloaded files:"
+        ls -la *.zip
+
+    - name: Unzip dictionary files
+      run: |
+        set -e
+        mkdir -p extracted_dicts
+        for zipfile in *.zip; do
+          if [ -f "$zipfile" ]; then
+            echo "Unzipping: $zipfile"
+            # Test archive integrity first
+            unzip -t "$zipfile" > /dev/null 2>&1 || { echo "ERROR: Archive $zipfile is corrupted"; exit 1; }
+            unzip -o -q "$zipfile" -d extracted_dicts/ || { echo "ERROR: Failed to unzip $zipfile"; exit 1; }
+          fi
+        done
+        
+        # Move JSON files to root for processing using find (more reliable than glob)
+        find extracted_dicts -type f -name "*.json" -exec mv {} . \;
+        rm -rf extracted_dicts
+
+        echo "Extracted files:"
+        ls -la *.json 2>/dev/null || { echo "ERROR: No JSON files found after extraction"; exit 1; }
+        
+        # Verify required files exist (use ls to check for any matches)
+        echo "Verifying required files..."
+        [ -n "$(ls jmdict-eng-*.json 2>/dev/null)" ] || { echo "ERROR: jmdict-eng-*.json not found"; exit 1; }
+        [ -n "$(ls jmdict-examples-eng-*.json 2>/dev/null)" ] || { echo "ERROR: jmdict-examples-eng-*.json not found"; exit 1; }
+        [ -n "$(ls kanjidic2-en-*.json 2>/dev/null)" ] || { echo "ERROR: kanjidic2-en-*.json not found"; exit 1; }
+        echo "✓ All required dictionary files present"
+
+    - name: Verify scripts exist
+      run: |
+        [ -f generate_general_decks.sh ] || { echo "ERROR: generate_general_decks.sh not found"; exit 1; }
+        [ -f scripts/create_tiered_decks.py ] || { echo "ERROR: scripts/create_tiered_decks.py not found"; exit 1; }
+        [ -x generate_general_decks.sh ] || chmod +x generate_general_decks.sh
+        echo "✓ All required scripts present"
+
+    - name: Run general deck generation script
+      run: |
+        ./generate_general_decks.sh
+
+    - name: Run tiered deck generation script
+      run: |
+        # Find the actual JSON files (version may vary)
+        JMDICT_FILE=$(ls -1 jmdict-eng-*.json 2>/dev/null | head -1)
+        JMDICT_EXAMPLES_FILE=$(ls -1 jmdict-examples-eng-*.json 2>/dev/null | head -1)
+        KANJIDIC_FILE=$(ls -1 kanjidic2-en-*.json 2>/dev/null | head -1)
+        
+        # Validate files exist
+        if [ -z "$JMDICT_FILE" ] || [ -z "$JMDICT_EXAMPLES_FILE" ] || [ -z "$KANJIDIC_FILE" ]; then
+          echo "ERROR: Could not find required JSON files"
+          echo "Looking for:"
+          echo "  - jmdict-eng-*.json: $JMDICT_FILE"
+          echo "  - jmdict-examples-eng-*.json: $JMDICT_EXAMPLES_FILE"
+          echo "  - kanjidic2-en-*.json: $KANJIDIC_FILE"
+          exit 1
+        fi
+        
+        echo "Using dictionary files:"
+        echo "  JMdict: $JMDICT_FILE"
+        echo "  JMdict Examples: $JMDICT_EXAMPLES_FILE"
+        echo "  Kanjidic2: $KANJIDIC_FILE"
+        
+        python3 scripts/create_tiered_decks.py \
+          --jmdict "$JMDICT_FILE" \
+          --jmdict-examples "$JMDICT_EXAMPLES_FILE" \
+          --kanjidic "$KANJIDIC_FILE" \
+          --output-dir tiered_decks
+
+    - name: Verify generated decks
+      run: |
+        echo "Verifying deck generation..."
+        
+        # Check general decks
+        GENERAL_COUNT=$(find anki_decks_general -type f -name "*.csv" 2>/dev/null | wc -l)
+        if [ "$GENERAL_COUNT" -eq 0 ]; then
+          echo "ERROR: No general deck CSV files generated"
+          exit 1
+        fi
+        echo "✓ Generated $GENERAL_COUNT general deck files"
+        
+        # Check tiered decks
+        TIERED_COUNT=$(find tiered_decks -type f -name "*.csv" 2>/dev/null | wc -l)
+        if [ "$TIERED_COUNT" -eq 0 ]; then
+          echo "ERROR: No tiered deck CSV files generated"
+          exit 1
+        fi
+        echo "✓ Generated $TIERED_COUNT tiered deck files"
+        
+        echo ""
+        echo "General decks:"
+        find anki_decks_general -type f -name "*.csv" | head -20
+        echo ""
+        echo "Tiered decks:"
+        find tiered_decks -type f -name "*.csv" | head -20
+
+    - name: Create modular archives
+      run: |
+        VERSION="${{ steps.get_release.outputs.release_tag }}"
+        DATE=$(date +%Y%m%d)
+        mkdir -p releases
+        
+        # Validate required variables
+        if [ -z "$VERSION" ]; then
+          echo "ERROR: VERSION is empty"
+          exit 1
+        fi
+
+        # Use unique temp directory to avoid conflicts
+        TEMP_DIR=$(mktemp -d)
+        trap "rm -rf $TEMP_DIR" EXIT
+        
+        # Create modular archives for General decks
+        echo "Creating General deck archives..."
+        
+        # Kanji decks by level
+        for level in N5 N4 N3 N2 N1; do
+          if [ -f "anki_decks_general/kanji/jlpt_${level}_kanji.csv" ]; then
+            mkdir -p "$TEMP_DIR/jlpt-${level}-kanji-general"
+            cp "anki_decks_general/kanji/jlpt_${level}_kanji.csv" "$TEMP_DIR/jlpt-${level}-kanji-general/"
+            tar -czf "releases/jlpt-${level}-kanji-general-${VERSION}-${DATE}.tar.gz" -C "$TEMP_DIR" "jlpt-${level}-kanji-general" || { echo "ERROR: Failed to create tar archive for ${level} kanji"; exit 1; }
+            (cd "$TEMP_DIR" && zip -r "${GITHUB_WORKSPACE}/releases/jlpt-${level}-kanji-general-${VERSION}-${DATE}.zip" "jlpt-${level}-kanji-general") || { echo "ERROR: Failed to create zip archive for ${level} kanji"; exit 1; }
+            rm -rf "$TEMP_DIR/jlpt-${level}-kanji-general"
+          fi
+        done
+
+        # Vocabulary decks by level
+        for level in N5 N4 N3 N2 N1; do
+          if [ -f "anki_decks_general/vocabulary/jlpt_${level}_vocab_examples.csv" ]; then
+            mkdir -p "$TEMP_DIR/jlpt-${level}-vocab-general"
+            cp "anki_decks_general/vocabulary/jlpt_${level}_vocab_examples.csv" "$TEMP_DIR/jlpt-${level}-vocab-general/"
+            tar -czf "releases/jlpt-${level}-vocab-general-${VERSION}-${DATE}.tar.gz" -C "$TEMP_DIR" "jlpt-${level}-vocab-general" || { echo "ERROR: Failed to create tar archive for ${level} vocab"; exit 1; }
+            (cd "$TEMP_DIR" && zip -r "${GITHUB_WORKSPACE}/releases/jlpt-${level}-vocab-general-${VERSION}-${DATE}.zip" "jlpt-${level}-vocab-general") || { echo "ERROR: Failed to create zip archive for ${level} vocab"; exit 1; }
+            rm -rf "$TEMP_DIR/jlpt-${level}-vocab-general"
+          fi
+        done
+
+        # Kana-only and non-JLPT vocab
+        if [ -f "anki_decks_general/vocabulary/jlpt_kana_only_vocab_examples.csv" ]; then
+          mkdir -p "$TEMP_DIR/jlpt-kana-only-vocab-general"
+          cp "anki_decks_general/vocabulary/jlpt_kana_only_vocab_examples.csv" "$TEMP_DIR/jlpt-kana-only-vocab-general/"
+          tar -czf "releases/jlpt-kana-only-vocab-general-${VERSION}-${DATE}.tar.gz" -C "$TEMP_DIR" "jlpt-kana-only-vocab-general" || { echo "ERROR: Failed to create tar archive for kana-only vocab"; exit 1; }
+          (cd "$TEMP_DIR" && zip -r "${GITHUB_WORKSPACE}/releases/jlpt-kana-only-vocab-general-${VERSION}-${DATE}.zip" "jlpt-kana-only-vocab-general") || { echo "ERROR: Failed to create zip archive for kana-only vocab"; exit 1; }
+          rm -rf "$TEMP_DIR/jlpt-kana-only-vocab-general"
+        fi
+
+        if [ -f "anki_decks_general/vocabulary/jlpt_non_jlpt_vocab_examples.csv" ]; then
+          mkdir -p "$TEMP_DIR/jlpt-non-jlpt-vocab-general"
+          cp "anki_decks_general/vocabulary/jlpt_non_jlpt_vocab_examples.csv" "$TEMP_DIR/jlpt-non-jlpt-vocab-general/"
+          tar -czf "releases/jlpt-non-jlpt-vocab-general-${VERSION}-${DATE}.tar.gz" -C "$TEMP_DIR" "jlpt-non-jlpt-vocab-general" || { echo "ERROR: Failed to create tar archive for non-JLPT vocab"; exit 1; }
+          (cd "$TEMP_DIR" && zip -r "${GITHUB_WORKSPACE}/releases/jlpt-non-jlpt-vocab-general-${VERSION}-${DATE}.zip" "jlpt-non-jlpt-vocab-general") || { echo "ERROR: Failed to create zip archive for non-JLPT vocab"; exit 1; }
+          rm -rf "$TEMP_DIR/jlpt-non-jlpt-vocab-general"
+        fi
+
+        # Create modular archives for Tiered decks
+        echo "Creating Tiered deck archives..."
+        
+        for level in N5 N4 N3 N2 N1; do
+          if [ -d "tiered_decks/${level}" ]; then
+            # Kanji tiered decks
+            mkdir -p "$TEMP_DIR/jlpt-${level}-kanji-tiered"
+            for tier in Tier_1 Tier_2 Tier_3 Tier_4; do
+              if [ -f "tiered_decks/${level}/${tier}/kanji.csv" ]; then
+                mkdir -p "$TEMP_DIR/jlpt-${level}-kanji-tiered/${tier}"
+                cp "tiered_decks/${level}/${tier}/kanji.csv" "$TEMP_DIR/jlpt-${level}-kanji-tiered/${tier}/"
+              fi
+            done
+            if [ -n "$(ls -A "$TEMP_DIR/jlpt-${level}-kanji-tiered" 2>/dev/null)" ]; then
+              tar -czf "releases/jlpt-${level}-kanji-tiered-${VERSION}-${DATE}.tar.gz" -C "$TEMP_DIR" "jlpt-${level}-kanji-tiered" || { echo "ERROR: Failed to create tar archive for ${level} kanji tiered"; exit 1; }
+              (cd "$TEMP_DIR" && zip -r "${GITHUB_WORKSPACE}/releases/jlpt-${level}-kanji-tiered-${VERSION}-${DATE}.zip" "jlpt-${level}-kanji-tiered") || { echo "ERROR: Failed to create zip archive for ${level} kanji tiered"; exit 1; }
+            fi
+            rm -rf "$TEMP_DIR/jlpt-${level}-kanji-tiered"
+
+            # Vocabulary tiered decks
+            mkdir -p "$TEMP_DIR/jlpt-${level}-vocab-tiered"
+            for tier in Tier_1 Tier_2 Tier_3 Tier_4; do
+              if [ -f "tiered_decks/${level}/${tier}/vocab.csv" ]; then
+                mkdir -p "$TEMP_DIR/jlpt-${level}-vocab-tiered/${tier}"
+                cp "tiered_decks/${level}/${tier}/vocab.csv" "$TEMP_DIR/jlpt-${level}-vocab-tiered/${tier}/"
+              fi
+            done
+            if [ -n "$(ls -A "$TEMP_DIR/jlpt-${level}-vocab-tiered" 2>/dev/null)" ]; then
+              tar -czf "releases/jlpt-${level}-vocab-tiered-${VERSION}-${DATE}.tar.gz" -C "$TEMP_DIR" "jlpt-${level}-vocab-tiered" || { echo "ERROR: Failed to create tar archive for ${level} vocab tiered"; exit 1; }
+              (cd "$TEMP_DIR" && zip -r "${GITHUB_WORKSPACE}/releases/jlpt-${level}-vocab-tiered-${VERSION}-${DATE}.zip" "jlpt-${level}-vocab-tiered") || { echo "ERROR: Failed to create zip archive for ${level} vocab tiered"; exit 1; }
+            fi
+            rm -rf "$TEMP_DIR/jlpt-${level}-vocab-tiered"
+          fi
+        done
+
+        # Cleanup handled by trap
+        
+        # Verify archives were created (avoid brace expansion issues)
+        ARCHIVE_COUNT=$(ls -1 releases/*.tar.gz releases/*.zip 2>/dev/null | wc -l)
+        if [ "$ARCHIVE_COUNT" -eq 0 ]; then
+          echo "ERROR: No archives were created"
+          exit 1
+        fi
+        echo "✓ Created $ARCHIVE_COUNT archive files"
+        
+        echo "Created archives:"
+        ls -lh releases/
+
+    - name: Verify archive integrity
+      run: |
+        echo "Verifying archive integrity..."
+        FAILED=0
+        
+        for archive in releases/*.tar.gz; do
+          if [ -f "$archive" ]; then
+            echo "Testing: $archive"
+            if ! tar -tzf "$archive" > /dev/null 2>&1; then
+              echo "ERROR: $archive is corrupted"
+              FAILED=1
+            fi
+          fi
+        done
+        
+        for archive in releases/*.zip; do
+          if [ -f "$archive" ]; then
+            echo "Testing: $archive"
+            if ! unzip -t "$archive" > /dev/null 2>&1; then
+              echo "ERROR: $archive is corrupted"
+              FAILED=1
+            fi
+          fi
+        done
+        
+        if [ "$FAILED" -eq 1 ]; then
+          echo "ERROR: Some archives failed integrity check"
+          exit 1
+        fi
+        echo "✓ All archives passed integrity check"
+
+    - name: Generate release notes
+      run: |
+        VERSION="${{ steps.get_release.outputs.release_tag }}"
+        DATE=$(date +%Y-%m-%d)
+
+        cat > RELEASE_NOTES.md << EOF
+        # JLPT Anki Decks - Release ${VERSION}
+
+        **Generated:** ${DATE}
+        **Dictionary Version:** ${VERSION}
+
+        ## Contents
+
+        This release includes modular Anki flashcard decks for JLPT (Japanese Language Proficiency Test) study. Download only what you need!
+
+        ## General Decks (by JLPT Level Only)
+
+        Simple organization with decks grouped by JLPT level (N5-N1).
+
+        ### Available General Decks
+
+        | File | Contents |
+        |------|----------|
+        | \`jlpt-N5-kanji-general-*\` | N5 Kanji with readings, meanings, and examples |
+        | \`jlpt-N5-vocab-general-*\` | N5 Vocabulary with example sentences |
+        | \`jlpt-N4-kanji-general-*\` | N4 Kanji with readings, meanings, and examples |
+        | \`jlpt-N4-vocab-general-*\` | N4 Vocabulary with example sentences |
+        | \`jlpt-N3-kanji-general-*\` | N3 Kanji with readings, meanings, and examples |
+        | \`jlpt-N3-vocab-general-*\` | N3 Vocabulary with example sentences |
+        | \`jlpt-N2-kanji-general-*\` | N2 Kanji with readings, meanings, and examples |
+        | \`jlpt-N2-vocab-general-*\` | N2 Vocabulary with example sentences |
+        | \`jlpt-N1-kanji-general-*\` | N1 Kanji with readings, meanings, and examples |
+        | \`jlpt-N1-vocab-general-*\` | N1 Vocabulary with example sentences |
+        | \`jlpt-kana-only-vocab-general-*\` | Kana-only vocabulary (hiragana/katakana) |
+        | \`jlpt-non-jlpt-vocab-general-*\` | Words using kanji outside JLPT scope |
+
+        ## Tiered Decks (by Level + Frequency)
+
+        Advanced organization with 4 frequency tiers per JLPT level. Each tier contains both kanji and vocabulary decks.
+
+        **Tier System:**
+        - **Tier 1**: Top 25% most frequent (easiest/common words)
+        - **Tier 2**: 25-50% frequency
+        - **Tier 3**: 50-75% frequency
+        - **Tier 4**: Bottom 25% least frequent (hardest/rare words)
+
+        ### Available Tiered Decks
+
+        | File | Contents |
+        |------|----------|
+        | \`jlpt-N5-kanji-tiered-*\` | N5 Kanji organized by frequency tiers |
+        | \`jlpt-N5-vocab-tiered-*\` | N5 Vocabulary organized by frequency tiers |
+        | \`jlpt-N4-kanji-tiered-*\` | N4 Kanji organized by frequency tiers |
+        | \`jlpt-N4-vocab-tiered-*\` | N4 Vocabulary organized by frequency tiers |
+        | \`jlpt-N3-kanji-tiered-*\` | N3 Kanji organized by frequency tiers |
+        | \`jlpt-N3-vocab-tiered-*\` | N3 Vocabulary organized by frequency tiers |
+        | \`jlpt-N2-kanji-tiered-*\` | N2 Kanji organized by frequency tiers |
+        | \`jlpt-N2-vocab-tiered-*\` | N2 Vocabulary organized by frequency tiers |
+        | \`jlpt-N1-kanji-tiered-*\` | N1 Kanji organized by frequency tiers |
+        | \`jlpt-N1-vocab-tiered-*\` | N1 Vocabulary organized by frequency tiers |
+
+        ## File Formats
+
+        Each deck is available in two formats:
+        - \`.tar.gz\` - Gzipped tar archive (Linux/macOS preferred)
+        - \`.zip\` - ZIP archive (Windows preferred)
+
+        ## Data Sources
+
+        - **JMdict**: Electronic Dictionary Research and Development Group (EDRDG)
+        - **Kanjidic2**: Creative Commons Attribution-ShareAlike License v4.0
+        - **Tatoeba Examples**: Creative Commons CC-BY 2.0 FR
+
+        ## Usage
+
+        1. Download the specific deck archive(s) you need
+        2. Extract the CSV file(s)
+        3. Import into Anki (File → Import)
+        4. Enable "Allow HTML in fields"
+
+        For detailed instructions, see the [README](https://github.com/${{ github.repository }}/blob/main/README.md).
+        EOF
+
+        cat RELEASE_NOTES.md
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.get_release.outputs.release_tag }}-${{ github.run_number }}
+        name: JLPT Anki Decks ${{ steps.get_release.outputs.release_tag }}
+        body_path: RELEASE_NOTES.md
+        files: releases/*
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: jlpt-anki-decks-${{ steps.get_release.outputs.release_tag }}
+        path: releases/*
+        retention-days: 30

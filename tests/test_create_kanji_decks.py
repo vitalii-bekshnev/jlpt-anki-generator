@@ -792,8 +792,8 @@ class TestFormatBackFieldWithExamples:
         assert "Example" in result  # New styled format uses "Example Words"
         assert "<div" in result  # HTML structure
 
-    def test_format_truncates_long_senses(self):
-        """Test that long senses are truncated"""
+    def test_format_preserves_long_senses(self):
+        """Test that long senses are not truncated"""
         char = {"kanji": "一", "meanings": "one"}
         long_sense = "A" * 150
         example_words = [
@@ -802,9 +802,11 @@ class TestFormatBackFieldWithExamples:
 
         result = format_back_field(char, "N5", example_words)
 
-        # Check that content is present but formatted as HTML
+        # Check that full content is present without truncation
         assert "一人" in result
         assert "ひとり" in result
+        assert long_sense in result  # Full sense should be present
+        assert "..." not in result  # No truncation ellipsis
         assert "<div" in result  # HTML structure
 
     def test_format_without_examples(self):

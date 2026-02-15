@@ -13,6 +13,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 from create_tiered_decks import (
+    build_kanji_examples_map,
     create_kanji_csv,
     create_vocab_csv,
     format_kanji_back_field,
@@ -231,6 +232,344 @@ class TestFormatKanjiBackField:
         assert "RTK" in result
         assert "2" in result
         assert "<div" in result  # HTML structure
+
+    def test_with_example_words(self):
+        """Test formatting with example words"""
+        char = {
+            "kanji": "学",
+            "meanings": "study; learning",
+            "on_readings": "ガク",
+            "kun_readings": "まな.ぶ",
+        }
+
+        example_words = [
+            {"word": "学生", "readings": "がくせい", "senses": "1. (noun) student"},
+            {"word": "学校", "readings": "がっこう", "senses": "1. (noun) school"},
+        ]
+
+        result = format_kanji_back_field(char, "N3", example_words)
+
+        # Check that example words are included
+        assert "学" in result
+        assert "Example Words" in result
+        assert "学生" in result
+        assert "学校" in result
+        assert "がくせい" in result
+        assert "がっこう" in result
+        assert "student" in result
+        assert "school" in result
+        assert "<div" in result  # HTML structure
+
+
+class TestBuildKanjiExamplesMap:
+    """Tests for build_kanji_examples_map function"""
+
+    def test_build_basic_mapping(self):
+        """Test building kanji examples map from vocabulary groups"""
+        vocab_groups = {
+            "N5": {
+                1: [
+                    {
+                        "word": "学生",
+                        "readings": "がくせい",
+                        "senses": "1. (noun) student",
+                    },
+                    {
+                        "word": "学校",
+                        "readings": "がっこう",
+                        "senses": "1. (noun) school",
+                    },
+                ],
+                2: [],
+                3: [],
+                4: [],
+            },
+            "N4": {
+                1: [],
+                2: [],
+                3: [],
+                4: [],
+            },
+            "N3": {
+                1: [],
+                2: [],
+                3: [],
+                4: [],
+            },
+            "N2": {
+                1: [],
+                2: [],
+                3: [],
+                4: [],
+            },
+            "N1": {
+                1: [],
+                2: [],
+                3: [],
+                4: [],
+            },
+        }
+
+        result = build_kanji_examples_map(vocab_groups, max_examples=3)
+
+        # Check that kanji characters are mapped to words containing them
+        assert "学" in result
+        assert "生" in result
+        assert "校" in result
+
+        # Check that 学 has both words
+        assert len(result["学"]) == 2
+        assert any(w["word"] == "学生" for w in result["学"])
+        assert any(w["word"] == "学校" for w in result["学"])
+
+        # Check that 生 and 校 have one word each
+        assert len(result["生"]) == 1
+        assert len(result["校"]) == 1
+
+    def test_max_examples_limit(self):
+        """Test that max_examples parameter limits the number of examples"""
+        vocab_groups = {
+            "N5": {
+                1: [
+                    {"word": "学生", "readings": "がくせい", "senses": "student"},
+                    {"word": "学校", "readings": "がっこう", "senses": "school"},
+                    {"word": "学習", "readings": "がくしゅう", "senses": "study"},
+                    {"word": "大学", "readings": "だいがく", "senses": "university"},
+                ],
+                2: [],
+                3: [],
+                4: [],
+            },
+            "N4": {"1": [], "2": [], "3": [], "4": []},
+            "N3": {"1": [], "2": [], "3": [], "4": []},
+            "N2": {"1": [], "2": [], "3": [], "4": []},
+            "N1": {"1": [], "2": [], "3": [], "4": []},
+        }
+
+        result = build_kanji_examples_map(vocab_groups, max_examples=2)
+
+        # 学 appears in all 4 words, but should be limited to 2
+        assert "学" in result
+        assert len(result["学"]) == 2
+
+    def test_no_duplicate_words(self):
+        """Test that the same word is not added multiple times for the same kanji"""
+        vocab_groups = {
+            "N5": {
+                1: [
+                    {"word": "学生", "readings": "がくせい", "senses": "student"},
+                ],
+                2: [
+                    {"word": "学生", "readings": "がくせい", "senses": "student"},
+                ],
+                3: [],
+                4: [],
+            },
+            "N4": {"1": [], "2": [], "3": [], "4": []},
+            "N3": {"1": [], "2": [], "3": [], "4": []},
+            "N2": {"1": [], "2": [], "3": [], "4": []},
+            "N1": {"1": [], "2": [], "3": [], "4": []},
+        }
+
+        result = build_kanji_examples_map(vocab_groups, max_examples=3)
+
+        # 学生 appears twice but should only be added once for kanji 学
+        assert "学" in result
+        assert len(result["学"]) == 1
+
+    def test_empty_vocab_groups(self):
+        """Test with empty vocabulary groups"""
+        vocab_groups = {
+            "N5": {"1": [], "2": [], "3": [], "4": []},
+            "N4": {"1": [], "2": [], "3": [], "4": []},
+            "N3": {"1": [], "2": [], "3": [], "4": []},
+            "N2": {"1": [], "2": [], "3": [], "4": []},
+            "N1": {"1": [], "2": [], "3": [], "4": []},
+        }
+
+        result = build_kanji_examples_map(vocab_groups)
+
+        assert result == {}
+
+    def test_kana_only_words_excluded(self):
+        """Test that kana-only words (no kanji) are not included"""
+        vocab_groups = {
+            "N5": {
+                1: [
+                    {"word": "学生", "readings": "がくせい", "senses": "student"},
+                    {"word": "です", "readings": "です", "senses": "to be"},
+                ],
+                2: [],
+                3: [],
+                4: [],
+            },
+            "N4": {"1": [], "2": [], "3": [], "4": []},
+            "N3": {"1": [], "2": [], "3": [], "4": []},
+            "N2": {"1": [], "2": [], "3": [], "4": []},
+            "N1": {"1": [], "2": [], "3": [], "4": []},
+        }
+
+        result = build_kanji_examples_map(vocab_groups)
+
+        # 学 and 生 should be present
+        assert "学" in result
+        assert "生" in result
+
+        # です is kana-only, so no entry for it
+        assert "で" not in result
+        assert "す" not in result
+
+    def test_prioritizes_frequent_words(self):
+        """Test that the most frequent words (lowest tier) are prioritized"""
+        vocab_groups = {
+            "N5": {
+                1: [
+                    {
+                        "word": "学生",
+                        "readings": "がくせい",
+                        "senses": "student",
+                        "tier": 1,
+                    },
+                ],
+                2: [
+                    {
+                        "word": "学校",
+                        "readings": "がっこう",
+                        "senses": "school",
+                        "tier": 2,
+                    },
+                ],
+                3: [
+                    {
+                        "word": "学習",
+                        "readings": "がくしゅう",
+                        "senses": "study",
+                        "tier": 3,
+                    },
+                ],
+                4: [
+                    {
+                        "word": "大学",
+                        "readings": "だいがく",
+                        "senses": "university",
+                        "tier": 4,
+                    },
+                ],
+            },
+            "N4": {"1": [], "2": [], "3": [], "4": []},
+            "N3": {"1": [], "2": [], "3": [], "4": []},
+            "N2": {"1": [], "2": [], "3": [], "4": []},
+            "N1": {"1": [], "2": [], "3": [], "4": []},
+        }
+
+        result = build_kanji_examples_map(vocab_groups, max_examples=3)
+
+        # 学 should have examples in order of frequency (tier 1, 2, 3)
+        assert "学" in result
+        assert len(result["学"]) == 3
+
+        # Most frequent words should come first
+        words_order = [w["word"] for w in result["学"]]
+        assert words_order == ["学生", "学校", "学習"]
+
+        # Tier 4 word (大学) should not be included since we only take top 3
+        assert "大学" not in words_order
+
+    def test_excludes_standalone_kanji(self):
+        """Test that standalone kanji are excluded from example words"""
+        vocab_groups = {
+            "N5": {
+                1: [
+                    {
+                        "word": "他",
+                        "readings": "ほか",
+                        "senses": "other",
+                        "tier": 1,
+                        "is_common": True,
+                    },
+                    {
+                        "word": "他人",
+                        "readings": "たにん",
+                        "senses": "other person",
+                        "tier": 1,
+                        "is_common": True,
+                    },
+                    {
+                        "word": "他に",
+                        "readings": "ほかに",
+                        "senses": "besides",
+                        "tier": 1,
+                        "is_common": True,
+                    },
+                ],
+                2: [],
+                3: [],
+                4: [],
+            },
+            "N4": {"1": [], "2": [], "3": [], "4": []},
+            "N3": {"1": [], "2": [], "3": [], "4": []},
+            "N2": {"1": [], "2": [], "3": [], "4": []},
+            "N1": {"1": [], "2": [], "3": [], "4": []},
+        }
+
+        result = build_kanji_examples_map(vocab_groups, max_examples=3)
+
+        # 他 should have examples but NOT include standalone "他"
+        assert "他" in result
+        assert len(result["他"]) == 2
+
+        # Check that standalone "他" is NOT in the examples
+        words = [w["word"] for w in result["他"]]
+        assert "他" not in words  # Standalone kanji should be excluded
+        assert "他人" in words
+        assert "他に" in words
+
+    def test_prioritizes_shorter_words_when_same_tier(self):
+        """Test that shorter words are prioritized when frequency is equal"""
+        vocab_groups = {
+            "N5": {
+                1: [
+                    {
+                        "word": "学問",
+                        "readings": "がくもん",
+                        "senses": "learning",
+                        "tier": 1,
+                    },
+                    {
+                        "word": "学生",
+                        "readings": "がくせい",
+                        "senses": "student",
+                        "tier": 1,
+                    },
+                    {
+                        "word": "学校",
+                        "readings": "がっこう",
+                        "senses": "school",
+                        "tier": 1,
+                    },
+                ],
+                2: [],
+                3: [],
+                4: [],
+            },
+            "N4": {"1": [], "2": [], "3": [], "4": []},
+            "N3": {"1": [], "2": [], "3": [], "4": []},
+            "N2": {"1": [], "2": [], "3": [], "4": []},
+            "N1": {"1": [], "2": [], "3": [], "4": []},
+        }
+
+        result = build_kanji_examples_map(vocab_groups, max_examples=3)
+
+        # 学 should have examples sorted by word length (all same tier)
+        assert "学" in result
+        assert len(result["学"]) == 3
+
+        # Shorter words should come first: 学生 (4), 学問 (4), 学校 (4) - all same length
+        # Then alphabetically: 学生, 学校, 学問
+        words_order = [w["word"] for w in result["学"]]
+        assert "学生" in words_order
+        assert "学問" in words_order
+        assert "学校" in words_order
 
 
 class TestCreateKanjiCsv:

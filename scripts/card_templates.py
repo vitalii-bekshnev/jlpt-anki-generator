@@ -352,8 +352,6 @@ def create_kanji_card(
             word_text = word.get("word", "")
             word_reading = word.get("readings", "")
             word_sense = word.get("senses", "")
-            if len(word_sense) > 80:
-                word_sense = word_sense[:80] + "..."
 
             word_items.append(
                 f"<div style='padding:6px 0;border-bottom:1px solid #eee;font-size:13px;color:#333'><strong>{word_text}</strong> <span style='color:#666'>({word_reading})</span> - <span style='color:#333'>{word_sense}</span></div>"

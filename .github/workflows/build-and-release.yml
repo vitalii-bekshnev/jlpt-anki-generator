@@ -232,6 +232,60 @@ jobs:
         fi
         echo "✓ Generated $TIERED_COUNT tiered deck files"
         
+        # Verify examples are included in general vocabulary decks
+        echo ""
+        echo "Verifying example sentences in general vocabulary decks..."
+        if [ -f "anki_decks_general/vocabulary/jlpt_N5_vocab_examples.csv" ]; then
+          EXAMPLE_COUNT=$(grep -c "Example" anki_decks_general/vocabulary/jlpt_N5_vocab_examples.csv || true)
+          if [ "$EXAMPLE_COUNT" -gt 0 ]; then
+            echo "✓ Example sentences found in N5 vocab deck ($EXAMPLE_COUNT occurrences)"
+          else
+            echo "ERROR: No example sentences found in N5 vocab deck!"
+            exit 1
+          fi
+        fi
+        
+        # Verify example words are included in general kanji decks
+        echo ""
+        echo "Verifying example words in general kanji decks..."
+        if [ -f "anki_decks_general/kanji/jlpt_N5_kanji.csv" ]; then
+          EXAMPLE_WORDS_COUNT=$(grep -c "Example Words" anki_decks_general/kanji/jlpt_N5_kanji.csv || true)
+          if [ "$EXAMPLE_WORDS_COUNT" -gt 0 ]; then
+            echo "✓ Example words found in N5 kanji deck ($EXAMPLE_WORDS_COUNT occurrences)"
+          else
+            echo "ERROR: No example words found in N5 kanji deck!"
+            exit 1
+          fi
+        fi
+        
+        # Verify examples are included in tiered vocabulary decks
+        echo ""
+        echo "Verifying example sentences in tiered vocabulary decks..."
+        if [ -f "tiered_decks/N5/Tier_1/vocab.csv" ]; then
+          TIERED_EXAMPLE_COUNT=$(grep -c "Example" tiered_decks/N5/Tier_1/vocab.csv || true)
+          if [ "$TIERED_EXAMPLE_COUNT" -gt 0 ]; then
+            echo "✓ Example sentences found in tiered N5 Tier 1 vocab deck ($TIERED_EXAMPLE_COUNT occurrences)"
+          else
+            echo "ERROR: No example sentences found in tiered N5 Tier 1 vocab deck!"
+            exit 1
+          fi
+        fi
+        
+        # Verify example words are included in tiered kanji decks
+        echo ""
+        echo "Verifying example words in tiered kanji decks..."
+        if [ -f "tiered_decks/N5/Tier_1/kanji.csv" ]; then
+          TIERED_KANJI_EXAMPLES=$(grep -c "Example Words" tiered_decks/N5/Tier_1/kanji.csv || true)
+          if [ "$TIERED_KANJI_EXAMPLES" -gt 0 ]; then
+            echo "✓ Example words found in tiered N5 Tier 1 kanji deck ($TIERED_KANJI_EXAMPLES occurrences)"
+          else
+            echo "ERROR: No example words found in tiered N5 Tier 1 kanji deck!"
+            exit 1
+          fi
+        fi
+        
+        echo ""
+        echo "All verifications passed!"
         echo ""
         echo "General decks:"
         find anki_decks_general -type f -name "*.csv" | head -20

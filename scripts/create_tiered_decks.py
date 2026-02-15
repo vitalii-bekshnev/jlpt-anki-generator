@@ -129,7 +129,85 @@ def process_kanji_character(char: Dict) -> Optional[Dict]:
     }
 
 
-def format_kanji_back_field(char: Dict, jlpt_level: str) -> str:
+def build_kanji_examples_map(
+    vocab_groups: Dict[str, Dict[int, List[Dict]]], max_examples: int = 3
+) -> Dict[str, List[Dict]]:
+    """
+    Build a mapping from kanji to example words that contain that kanji.
+    Prioritizes the most frequent words (lowest tier numbers) first.
+
+    Args:
+        vocab_groups: Dictionary of JLPT level -> tier -> list of words
+        max_examples: Maximum number of examples per kanji
+
+    Returns:
+        Dictionary mapping kanji character to list of example words
+    """
+    kanji_all_words: Dict[str, List[Dict]] = {}
+
+    # First pass: collect ALL words containing each kanji with tier info
+    for jlpt_level in vocab_groups:
+        for tier in vocab_groups[jlpt_level]:
+            for word in vocab_groups[jlpt_level][tier]:
+                word_text = word.get("word", "")
+                word_tier = word.get("tier", 999)  # Default to high tier if not set
+
+                # Check each character in the word
+                for char in word_text:
+                    # Only process kanji characters (CJK Unified Ideographs)
+                    if "\u4e00" <= char <= "\u9fff":
+                        if char not in kanji_all_words:
+                            kanji_all_words[char] = []
+
+                        # Skip if the word is exactly the kanji character itself
+                        if word_text == char:
+                            continue
+
+                        # Add word with tier info if not already added for this kanji
+                        if not any(
+                            w.get("word") == word.get("word")
+                            for w in kanji_all_words[char]
+                        ):
+                            # Store word with tier for sorting
+                            word_with_tier = dict(word)
+                            word_with_tier["_sort_tier"] = word_tier
+                            kanji_all_words[char].append(word_with_tier)
+
+    # Second pass: sort by tier (frequency) and take top max_examples
+    kanji_examples: Dict[str, List[Dict]] = {}
+    for char, words in kanji_all_words.items():
+        # Sort by:
+        # 1. tier (lower tier = more frequent)
+        # 2. is_common (common words first)
+        # 3. word length (shorter words first)
+        # 4. alphabetical order
+        sorted_words = sorted(
+            words,
+            key=lambda w: (
+                w.get("_sort_tier", 999),
+                not w.get(
+                    "is_common", False
+                ),  # False (common) sorts before True (not common)
+                len(w.get("word", "")),
+                w.get("word", ""),
+            ),
+        )
+
+        # Take top max_examples and remove the sorting key
+        selected_words = []
+        for word in sorted_words[:max_examples]:
+            word_copy = dict(word)
+            word_copy.pop("_sort_tier", None)  # Remove internal sorting key
+            selected_words.append(word_copy)
+
+        kanji_examples[char] = selected_words
+
+    return kanji_examples
+
+
+def format_kanji_back_field(
+    char: Dict, jlpt_level: str, example_words: Optional[List[Dict]] = None
+) -> str:
     """Create formatted back field with styled HTML"""
     return create_kanji_card(
         kanji=char["kanji"],
@@ -143,14 +221,17 @@ def format_kanji_back_field(char: Dict, jlpt_level: str) -> str:
         heisig_rtk=char.get("heisig_rtk") or None,
         heisig6_rtk=char.get("heisig6_rtk") or None,
         nanori=char.get("nanori") or None,
-        example_words=None,
+        example_words=example_words,
         jlpt_level=jlpt_level,
         tier=char.get("tier"),
     )
 
 
 def create_kanji_csv(
-    characters: List[Dict], output_path: Path, jlpt_level: str
+    characters: List[Dict],
+    output_path: Path,
+    jlpt_level: str,
+    example_words_map: Optional[Dict[str, List[Dict]]] = None,
 ) -> None:
     """Create Anki-compatible CSV file for kanji with styled HTML front"""
     fieldnames = ["kanji", "back", "tags"]
@@ -163,7 +244,11 @@ def create_kanji_csv(
             jlpt_level=jlpt_level,
         )
 
-        back = format_kanji_back_field(char, jlpt_level)
+        # Get example words for this kanji if available
+        example_words = (
+            example_words_map.get(char["kanji"], []) if example_words_map else None
+        )
+        back = format_kanji_back_field(char, jlpt_level, example_words)
 
         # Tags
         tags_list = []
@@ -451,6 +536,11 @@ def main():
 
     print(f"Processed {vocab_processed} words with JLPT levels and frequency data")
 
+    # Build kanji -> example words mapping from processed vocabulary
+    print("\nBuilding kanji example words mapping...")
+    kanji_examples_map = build_kanji_examples_map(jlpt_vocab_groups, max_examples=3)
+    print(f"Found example words for {len(kanji_examples_map)} kanji")
+
     # Create directory structure and output files
     print(f"\nCreating tiered deck structure in {output_dir}...")
     output_dir.mkdir(exist_ok=True)
@@ -476,7 +566,7 @@ def main():
             # Create kanji deck if there are kanji
             if kanji_list:
                 kanji_path = tier_dir / "kanji.csv"
-                create_kanji_csv(kanji_list, kanji_path, jlpt_level)
+                create_kanji_csv(kanji_list, kanji_path, jlpt_level, kanji_examples_map)
                 total_kanji += len(kanji_list)
 
             # Create vocab deck if there are words

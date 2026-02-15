@@ -1,4 +1,4 @@
-# JLPT Anki Decks
+# JLPT Anki Decks (JLPT Anki Generator)
 
 Free Anki flashcard decks for JLPT (Japanese Language Proficiency Test) study. Includes kanji and vocabulary for all levels (N5-N1).
 

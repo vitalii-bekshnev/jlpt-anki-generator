@@ -42,8 +42,9 @@ jobs:
           exit 1
         fi
         echo "Latest release: $LATEST_RELEASE"
-        # Sanitize: remove any characters that could cause shell injection
-        SANITIZED_VERSION=$(echo "$LATEST_RELEASE" | tr -cd '[:alnum:].-_')
+        # Sanitize: only allow safe characters for version tags
+        # Keep alphanumerics, dots, dashes, underscores, and plus signs (used in semantic versioning)
+        SANITIZED_VERSION=$(echo "$LATEST_RELEASE" | tr -cd '[:alnum:].-_+')
         echo "release_tag=$SANITIZED_VERSION" >> $GITHUB_OUTPUT
 
     - name: Check if release already exists
@@ -90,12 +91,38 @@ jobs:
         RELEASE_TAG="${{ steps.get_release.outputs.release_tag }}"
         echo "Downloading files from release: $RELEASE_TAG"
 
+        # Fetch release data with error handling
+        API_URL="https://api.github.com/repos/scriptin/jmdict-simplified/releases/tags/$RELEASE_TAG"
+        echo "Fetching from: $API_URL"
+        
+        HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -H "Authorization: token $GH_TOKEN" "$API_URL")
+        HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n1)
+        API_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
+        
+        echo "HTTP Status: $HTTP_STATUS"
+        
+        if [ "$HTTP_STATUS" -ne 200 ]; then
+          echo "ERROR: API request failed with status $HTTP_STATUS"
+          echo "Response: $API_BODY"
+          exit 1
+        fi
+        
+        # Check if response has assets
+        if echo "$API_BODY" | jq -e '.assets' > /dev/null 2>&1; then
+          echo "Found assets field in response"
+        else
+          echo "ERROR: No assets field found in API response"
+          echo "Response: $API_BODY"
+          exit 1
+        fi
+        
         # Get download URLs for specific files
-        URLS=$(curl -s -H "Authorization: token $GH_TOKEN" "https://api.github.com/repos/scriptin/jmdict-simplified/releases/tags/$RELEASE_TAG" | \
-          jq -r '.assets[] | select(.name | test("jmdict-eng-.*\\.zip$|jmdict-examples-eng-.*\\.zip$|kanjidic2-en-.*\\.zip$")) | .browser_download_url')
+        URLS=$(echo "$API_BODY" | jq -r '.assets[]? | select(.name | test("jmdict-eng-.*\\.zip$|jmdict-examples-eng-.*\\.zip$|kanjidic2-en-.*\\.zip$")) | .browser_download_url')
         
         if [ -z "$URLS" ]; then
           echo "ERROR: No matching files found in release"
+          echo "Available assets:"
+          echo "$API_BODY" | jq -r '.assets[]? | .name'
           exit 1
         fi
         

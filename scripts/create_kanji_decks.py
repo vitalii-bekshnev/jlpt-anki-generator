@@ -21,6 +21,7 @@ from jmdict_utils import (
     load_json,
     process_word,
 )
+from card_templates import create_kanji_card, create_kanji_front
 
 
 def load_kanjidic(filepath: Path) -> Dict:
@@ -173,60 +174,26 @@ def find_example_words(
     return examples
 
 
-def format_back_field(char: Dict, example_words: Optional[List[Dict]] = None) -> str:
-    """Create formatted back field with all kanji information"""
-    parts = []
-
-    # Meanings
-    if char.get("meanings"):
-        parts.append(f"<b>Meanings:</b> {char['meanings']}")
-
-    # Readings
-    if char.get("on_readings"):
-        parts.append(f"<b>On'yomi:</b> {char['on_readings']}")
-    if char.get("kun_readings"):
-        parts.append(f"<b>Kun'yomi:</b> {char['kun_readings']}")
-
-    # Name readings
-    if char.get("nanori"):
-        parts.append(f"<b>Name readings:</b> {char['nanori']}")
-
-    # Stats
-    stats = []
-    if char.get("stroke_count"):
-        stats.append(f"Strokes: {char['stroke_count']}")
-    if char.get("radical"):
-        stats.append(f"Radical: {char['radical']}")
-    if char.get("frequency"):
-        stats.append(f"Freq: #{char['frequency']}")
-    if stats:
-        parts.append(f"<b>Stats:</b> {' | '.join(stats)}")
-
-    # Heisig RTK references
-    if char.get("heisig_rtk") or char.get("heisig6_rtk"):
-        rtk_parts = []
-        if char.get("heisig_rtk"):
-            rtk_parts.append(f"RTK: #{char['heisig_rtk']}")
-        if char.get("heisig6_rtk"):
-            rtk_parts.append(f"RTK6: #{char['heisig6_rtk']}")
-        parts.append(f"<b>Heisig:</b> {' | '.join(rtk_parts)}")
-
-    # Example words
-    if example_words:
-        word_parts = ["<b>Example Words:</b>"]
-        for i, word in enumerate(example_words, 1):
-            word_line = f"{i}. {word['word']}"
-            if word.get("readings"):
-                word_line += f" ({word['readings']})"
-            # Truncate long senses
-            senses = word.get("senses", "")
-            if len(senses) > 100:
-                senses = senses[:100] + "..."
-            word_line += f" - {senses}"
-            word_parts.append(word_line)
-        parts.append("<br>".join(word_parts))
-
-    return "<br><br>".join(parts)
+def format_back_field(
+    char: Dict, jlpt_level: str, example_words: Optional[List[Dict]] = None
+) -> str:
+    """Create formatted back field with styled HTML"""
+    return create_kanji_card(
+        kanji=char["kanji"],
+        meanings=char.get("meanings", ""),
+        on_readings=char.get("on_readings", ""),
+        kun_readings=char.get("kun_readings", ""),
+        stroke_count=char.get("stroke_count"),
+        radical=char.get("radical"),
+        frequency=char.get("frequency"),
+        grade=char.get("grade"),
+        heisig_rtk=char.get("heisig_rtk") or None,
+        heisig6_rtk=char.get("heisig6_rtk") or None,
+        nanori=char.get("nanori") or None,
+        example_words=example_words,
+        jlpt_level=jlpt_level,
+        tier=char.get("tier"),
+    )
 
 
 def create_anki_csv(
@@ -235,15 +202,21 @@ def create_anki_csv(
     jlpt_tier: str,
     example_words_map: Optional[Dict[str, List[Dict]]] = None,
 ) -> None:
-    """Create Anki-compatible CSV file"""
+    """Create Anki-compatible CSV file with styled HTML front"""
     fieldnames = ["kanji", "back", "tags"]
 
     output_rows = []
     for char in characters:
+        # Create styled front field
+        front = create_kanji_front(
+            kanji=char["kanji"],
+            jlpt_level=jlpt_tier,
+        )
+
         example_words = (
             example_words_map.get(char["kanji"], []) if example_words_map else None
         )
-        back = format_back_field(char, example_words)
+        back = format_back_field(char, jlpt_tier, example_words)
 
         # Tags
         tags_list = [jlpt_tier]
@@ -252,7 +225,7 @@ def create_anki_csv(
         if char.get("tier"):
             tags_list.append(f"freq_tier{char['tier']}")
 
-        row = {"kanji": char["kanji"], "back": back, "tags": " ".join(tags_list)}
+        row = {"kanji": front, "back": back, "tags": " ".join(tags_list)}
         output_rows.append(row)
 
     with open(output_path, "w", newline="", encoding="utf-8") as f:

@@ -37,6 +37,12 @@ from jmdict_utils import (
     get_word_frequency_tier,
     process_word,
 )
+from card_templates import (
+    create_kanji_card,
+    create_kanji_front,
+    create_vocab_card,
+    create_vocab_front,
+)
 
 
 def process_kanji_character(char: Dict) -> Optional[Dict]:
@@ -123,54 +129,41 @@ def process_kanji_character(char: Dict) -> Optional[Dict]:
     }
 
 
-def format_kanji_back_field(char: Dict) -> str:
-    """Create formatted back field with all kanji information"""
-    parts = []
-
-    # Meanings
-    if char.get("meanings"):
-        parts.append(f"<b>Meanings:</b> {char['meanings']}")
-
-    # Readings
-    if char.get("on_readings"):
-        parts.append(f"<b>On'yomi:</b> {char['on_readings']}")
-    if char.get("kun_readings"):
-        parts.append(f"<b>Kun'yomi:</b> {char['kun_readings']}")
-
-    # Name readings
-    if char.get("nanori"):
-        parts.append(f"<b>Name readings:</b> {char['nanori']}")
-
-    # Stats
-    stats = []
-    if char.get("stroke_count"):
-        stats.append(f"Strokes: {char['stroke_count']}")
-    if char.get("radical"):
-        stats.append(f"Radical: {char['radical']}")
-    if char.get("frequency"):
-        stats.append(f"Freq: #{char['frequency']}")
-    if stats:
-        parts.append(f"<b>Stats:</b> {' | '.join(stats)}")
-
-    # Heisig RTK references
-    if char.get("heisig_rtk") or char.get("heisig6_rtk"):
-        rtk_parts = []
-        if char.get("heisig_rtk"):
-            rtk_parts.append(f"RTK: #{char['heisig_rtk']}")
-        if char.get("heisig6_rtk"):
-            rtk_parts.append(f"RTK6: #{char['heisig6_rtk']}")
-        parts.append(f"<b>Heisig:</b> {' | '.join(rtk_parts)}")
-
-    return "<br><br>".join(parts)
+def format_kanji_back_field(char: Dict, jlpt_level: str) -> str:
+    """Create formatted back field with styled HTML"""
+    return create_kanji_card(
+        kanji=char["kanji"],
+        meanings=char.get("meanings", ""),
+        on_readings=char.get("on_readings", ""),
+        kun_readings=char.get("kun_readings", ""),
+        stroke_count=char.get("stroke_count"),
+        radical=char.get("radical"),
+        frequency=char.get("frequency"),
+        grade=char.get("grade"),
+        heisig_rtk=char.get("heisig_rtk") or None,
+        heisig6_rtk=char.get("heisig6_rtk") or None,
+        nanori=char.get("nanori") or None,
+        example_words=None,
+        jlpt_level=jlpt_level,
+        tier=char.get("tier"),
+    )
 
 
-def create_kanji_csv(characters: List[Dict], output_path: Path) -> None:
-    """Create Anki-compatible CSV file for kanji"""
+def create_kanji_csv(
+    characters: List[Dict], output_path: Path, jlpt_level: str
+) -> None:
+    """Create Anki-compatible CSV file for kanji with styled HTML front"""
     fieldnames = ["kanji", "back", "tags"]
 
     output_rows = []
     for char in characters:
-        back = format_kanji_back_field(char)
+        # Create styled front field
+        front = create_kanji_front(
+            kanji=char["kanji"],
+            jlpt_level=jlpt_level,
+        )
+
+        back = format_kanji_back_field(char, jlpt_level)
 
         # Tags
         tags_list = []
@@ -179,7 +172,7 @@ def create_kanji_csv(characters: List[Dict], output_path: Path) -> None:
         if char.get("tier"):
             tags_list.append(f"freq_tier{char['tier']}")
 
-        row = {"kanji": char["kanji"], "back": back, "tags": " ".join(tags_list)}
+        row = {"kanji": front, "back": back, "tags": " ".join(tags_list)}
         output_rows.append(row)
 
     with open(output_path, "w", newline="", encoding="utf-8") as f:
@@ -191,28 +184,33 @@ def create_kanji_csv(characters: List[Dict], output_path: Path) -> None:
 
 
 def create_vocab_csv(
-    words: List[Dict], output_path: Path, include_examples: bool = False
+    words: List[Dict],
+    output_path: Path,
+    jlpt_level: str,
+    include_examples: bool = False,
 ) -> None:
-    """Create Anki-compatible CSV file for vocabulary"""
+    """Create Anki-compatible CSV file for vocabulary with styled HTML front and back"""
     fieldnames = ["word", "back", "tags"]
 
     output_rows = []
     for word in words:
-        back_parts = []
+        # Create styled front field
+        front = create_vocab_front(
+            word=word["word"],
+            readings=word.get("readings", ""),
+            jlpt_level=jlpt_level,
+        )
 
-        # Readings
-        if word.get("readings"):
-            back_parts.append(f"<b>Reading:</b> {word['readings']}")
-
-        # Meanings
-        if word.get("senses"):
-            back_parts.append(f"<b>Meanings:</b><br>{word['senses']}")
-
-        # Examples (if included)
-        if include_examples and word.get("examples"):
-            back_parts.append(f"<b>Examples:</b><br>{word['examples']}")
-
-        back = "<br><br>".join(back_parts)
+        # Use new styled HTML template for back
+        back = create_vocab_card(
+            word=word["word"],
+            readings=word.get("readings", ""),
+            meanings=word.get("senses", ""),
+            examples=word.get("examples") if include_examples else None,
+            jlpt_level=jlpt_level,
+            is_common=word.get("is_common", False),
+            tier=word.get("tier"),
+        )
 
         # Tags
         tags_list = []
@@ -223,7 +221,7 @@ def create_vocab_csv(
         if word.get("tier"):
             tags_list.append(f"freq_tier{word['tier']}")
 
-        row = {"word": word["word"], "back": back, "tags": " ".join(tags_list)}
+        row = {"word": front, "back": back, "tags": " ".join(tags_list)}
         output_rows.append(row)
 
     with open(output_path, "w", newline="", encoding="utf-8") as f:
@@ -478,14 +476,17 @@ def main():
             # Create kanji deck if there are kanji
             if kanji_list:
                 kanji_path = tier_dir / "kanji.csv"
-                create_kanji_csv(kanji_list, kanji_path)
+                create_kanji_csv(kanji_list, kanji_path, jlpt_level)
                 total_kanji += len(kanji_list)
 
             # Create vocab deck if there are words
             if vocab_list:
                 vocab_path = tier_dir / "vocab.csv"
                 create_vocab_csv(
-                    vocab_list, vocab_path, include_examples=include_examples
+                    vocab_list,
+                    vocab_path,
+                    jlpt_level,
+                    include_examples=include_examples,
                 )
                 total_vocab += len(vocab_list)
 

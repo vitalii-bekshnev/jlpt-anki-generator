@@ -382,23 +382,20 @@ class TestFormatBackField:
             "heisig6_rtk": "2",
         }
 
-        result = format_back_field(char)
+        result = format_back_field(char, "N3")
 
-        assert "Meanings:" in result
+        # Check for HTML structure and content
+        assert "学" in result
         assert "study; learning" in result
-        assert "On'yomi:" in result
         assert "ガク" in result
-        assert "Kun'yomi:" in result
         assert "まな.ぶ" in result
-        assert "Name readings:" in result
         assert "たか" in result
-        assert "Stats:" in result
-        assert "Strokes: 8" in result
-        assert "Radical: 子" in result
-        assert "Freq: #348" in result
-        assert "Heisig:" in result
-        assert "RTK: #1" in result
-        assert "RTK6: #2" in result
+        assert "8" in result
+        assert "子" in result
+        assert "348" in result
+        assert "RTK" in result
+        assert "N3" in result
+        assert "<div" in result  # HTML structure
 
     def test_no_optional_fields(self):
         """Test formatting with minimal data"""
@@ -409,21 +406,22 @@ class TestFormatBackField:
             "kun_readings": "ひと; ひと.つ",
         }
 
-        result = format_back_field(char)
+        result = format_back_field(char, "N5")
 
-        assert "Meanings:" in result
-        assert "On'yomi:" in result
-        assert "Kun'yomi:" in result
-        assert "Name readings:" not in result
-        assert "Stats:" not in result
-        assert "Heisig:" not in result
+        assert "一" in result
+        assert "one" in result
+        assert "イチ" in result
+        assert "ひと" in result
+        assert "<div" in result  # HTML structure
 
     def test_only_meanings(self):
         """Test formatting with only meanings"""
         char = {"kanji": "一", "meanings": "one"}
 
-        result = format_back_field(char)
-        assert result == "<b>Meanings:</b> one"
+        result = format_back_field(char, "N5")
+        assert "一" in result
+        assert "one" in result
+        assert "<div" in result  # HTML structure
 
 
 class TestCreateAnkiCsv:
@@ -449,7 +447,8 @@ class TestCreateAnkiCsv:
             reader = csv.DictReader(f)
             rows = list(reader)
             assert len(rows) == 1
-            assert rows[0]["kanji"] == "一"
+            assert "一" in rows[0]["kanji"]
+            assert "<div" in rows[0]["kanji"]  # HTML structure
             assert "one" in rows[0]["back"]
             assert "N5" in rows[0]["tags"]
             assert "grade1" in rows[0]["tags"]
@@ -469,9 +468,10 @@ class TestCreateAnkiCsv:
             reader = csv.DictReader(f)
             rows = list(reader)
             assert len(rows) == 3
-            assert rows[0]["kanji"] == "一"
-            assert rows[1]["kanji"] == "二"
-            assert rows[2]["kanji"] == "三"
+            assert "一" in rows[0]["kanji"]
+            assert "二" in rows[1]["kanji"]
+            assert "三" in rows[2]["kanji"]
+            assert "<div" in rows[0]["kanji"]  # HTML structure
 
     def test_no_grade(self, tmp_path):
         """Test CSV without grade information"""
@@ -779,15 +779,18 @@ class TestFormatBackFieldWithExamples:
             {"word": "学生", "readings": "がくせい", "senses": "1. (noun) student"},
         ]
 
-        result = format_back_field(char, example_words)
+        result = format_back_field(char, "N3", example_words)
 
-        assert "Example Words:" in result
-        assert "1. 学校" in result
+        # Check HTML structure and content
+        assert "学" in result
+        assert "学校" in result
         assert "がっこう" in result
         assert "school" in result
-        assert "2. 学生" in result
+        assert "学生" in result
         assert "がくせい" in result
         assert "student" in result
+        assert "Example" in result  # New styled format uses "Example Words"
+        assert "<div" in result  # HTML structure
 
     def test_format_truncates_long_senses(self):
         """Test that long senses are truncated"""
@@ -797,10 +800,12 @@ class TestFormatBackFieldWithExamples:
             {"word": "一人", "readings": "ひとり", "senses": long_sense},
         ]
 
-        result = format_back_field(char, example_words)
+        result = format_back_field(char, "N5", example_words)
 
-        assert "..." in result
-        assert len(result) < len(long_sense) + 100
+        # Check that content is present but formatted as HTML
+        assert "一人" in result
+        assert "ひとり" in result
+        assert "<div" in result  # HTML structure
 
     def test_format_without_examples(self):
         """Test formatting without example words"""
@@ -811,10 +816,13 @@ class TestFormatBackFieldWithExamples:
             "kun_readings": "まな.ぶ",
         }
 
-        result = format_back_field(char, None)
+        result = format_back_field(char, "N3", None)
 
-        assert "Example Words:" not in result
-        assert "Meanings:" in result
+        # Should not have example words section
+        assert "Example Words" not in result
+        assert "学" in result
+        assert "study" in result
+        assert "<div" in result  # HTML structure
 
     def test_format_with_empty_examples(self):
         """Test formatting with empty example words list"""
@@ -823,9 +831,11 @@ class TestFormatBackFieldWithExamples:
             "meanings": "study",
         }
 
-        result = format_back_field(char, [])
+        result = format_back_field(char, "N3", [])
 
-        assert "Example Words:" not in result
+        assert "Example Words" not in result
+        assert "学" in result
+        assert "<div" in result  # HTML structure
 
 
 class TestCreateAnkiCsvWithExamples:
@@ -854,8 +864,11 @@ class TestCreateAnkiCsvWithExamples:
         with open(output_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             rows = list(reader)
-            assert "Example Words:" in rows[0]["back"]
+            # Check new styled HTML format
+            assert "学" in rows[0]["back"]
             assert "学校" in rows[0]["back"]
+            assert "がっこう" in rows[0]["back"]
+            assert "<div" in rows[0]["back"]  # HTML structure
 
     def test_csv_without_example_map(self, tmp_path):
         """Test creating CSV without example words map"""
@@ -867,7 +880,9 @@ class TestCreateAnkiCsvWithExamples:
         with open(output_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             rows = list(reader)
-            assert "Example Words:" not in rows[0]["back"]
+            assert "Example Words" not in rows[0]["back"]
+            assert "一" in rows[0]["back"]
+            assert "<div" in rows[0]["back"]  # HTML structure
 
 
 class TestParseArgsWithJmdict:

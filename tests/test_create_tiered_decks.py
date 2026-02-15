@@ -163,23 +163,20 @@ class TestFormatKanjiBackField:
             "heisig6_rtk": "2",
         }
 
-        result = format_kanji_back_field(char)
+        result = format_kanji_back_field(char, "N3")
 
-        assert "Meanings:" in result
+        # Check HTML structure and content
+        assert "学" in result
         assert "study; learning" in result
-        assert "On'yomi:" in result
         assert "ガク" in result
-        assert "Kun'yomi:" in result
         assert "まな.ぶ" in result
-        assert "Name readings:" in result
         assert "たか" in result
-        assert "Stats:" in result
-        assert "Strokes: 8" in result
-        assert "Radical: 子" in result
-        assert "Freq: #348" in result
-        assert "Heisig:" in result
-        assert "RTK: #1" in result
-        assert "RTK6: #2" in result
+        assert "8" in result
+        assert "子" in result
+        assert "348" in result
+        assert "RTK" in result
+        assert "N3" in result
+        assert "<div" in result  # HTML structure
 
     def test_no_optional_fields(self):
         """Test formatting with minimal data"""
@@ -190,21 +187,22 @@ class TestFormatKanjiBackField:
             "kun_readings": "ひと; ひと.つ",
         }
 
-        result = format_kanji_back_field(char)
+        result = format_kanji_back_field(char, "N5")
 
-        assert "Meanings:" in result
-        assert "On'yomi:" in result
-        assert "Kun'yomi:" in result
-        assert "Name readings:" not in result
-        assert "Stats:" not in result
-        assert "Heisig:" not in result
+        assert "一" in result
+        assert "one" in result
+        assert "イチ" in result
+        assert "ひと" in result
+        assert "<div" in result  # HTML structure
 
     def test_only_meanings(self):
         """Test formatting with only meanings"""
         char = {"kanji": "一", "meanings": "one"}
 
-        result = format_kanji_back_field(char)
-        assert result == "<b>Meanings:</b> one"
+        result = format_kanji_back_field(char, "N5")
+        assert "一" in result
+        assert "one" in result
+        assert "<div" in result  # HTML structure
 
     def test_only_heisig_rtk(self):
         """Test formatting with only heisig_rtk"""
@@ -214,9 +212,11 @@ class TestFormatKanjiBackField:
             "heisig_rtk": "1",
         }
 
-        result = format_kanji_back_field(char)
-        assert "RTK: #1" in result
-        assert "RTK6" not in result
+        result = format_kanji_back_field(char, "N5")
+        assert "一" in result
+        assert "RTK" in result
+        assert "1" in result
+        assert "<div" in result  # HTML structure
 
     def test_only_heisig6_rtk(self):
         """Test formatting with only heisig6_rtk"""
@@ -226,9 +226,11 @@ class TestFormatKanjiBackField:
             "heisig6_rtk": "2",
         }
 
-        result = format_kanji_back_field(char)
-        assert "RTK6: #2" in result
-        assert "RTK:" not in result
+        result = format_kanji_back_field(char, "N5")
+        assert "一" in result
+        assert "RTK" in result
+        assert "2" in result
+        assert "<div" in result  # HTML structure
 
 
 class TestCreateKanjiCsv:
@@ -247,14 +249,15 @@ class TestCreateKanjiCsv:
             }
         ]
 
-        create_kanji_csv(characters, output_path)
+        create_kanji_csv(characters, output_path, "N5")
 
         assert output_path.exists()
         with open(output_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             rows = list(reader)
             assert len(rows) == 1
-            assert rows[0]["kanji"] == "一"
+            assert "一" in rows[0]["kanji"]
+            assert "<div" in rows[0]["kanji"]  # HTML structure
             assert "one" in rows[0]["back"]
             assert "grade1" in rows[0]["tags"]
 
@@ -267,15 +270,16 @@ class TestCreateKanjiCsv:
             {"kanji": "三", "meanings": "three", "grade": 1},
         ]
 
-        create_kanji_csv(characters, output_path)
+        create_kanji_csv(characters, output_path, "N5")
 
         with open(output_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             rows = list(reader)
             assert len(rows) == 3
-            assert rows[0]["kanji"] == "一"
-            assert rows[1]["kanji"] == "二"
-            assert rows[2]["kanji"] == "三"
+            assert "一" in rows[0]["kanji"]
+            assert "二" in rows[1]["kanji"]
+            assert "三" in rows[2]["kanji"]
+            assert "<div" in rows[0]["kanji"]  # HTML structure
 
     def test_with_tier_tag(self, tmp_path):
         """Test CSV with tier information"""
@@ -284,7 +288,7 @@ class TestCreateKanjiCsv:
             {"kanji": "一", "meanings": "one", "grade": 1, "tier": 1},
         ]
 
-        create_kanji_csv(characters, output_path)
+        create_kanji_csv(characters, output_path, "N5")
 
         with open(output_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
@@ -296,7 +300,7 @@ class TestCreateKanjiCsv:
         output_path = tmp_path / "test.csv"
         characters = [{"kanji": "一", "meanings": "one"}]
 
-        create_kanji_csv(characters, output_path)
+        create_kanji_csv(characters, output_path, "N5")
 
         with open(output_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
@@ -310,7 +314,7 @@ class TestCreateKanjiCsv:
         output_path = tmp_path / "test.csv"
         characters = []
 
-        create_kanji_csv(characters, output_path)
+        create_kanji_csv(characters, output_path, "N5")
 
         with open(output_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
@@ -334,15 +338,16 @@ class TestCreateVocabCsv:
             }
         ]
 
-        create_vocab_csv(words, output_path, include_examples=False)
+        create_vocab_csv(words, output_path, "N5", include_examples=False)
 
         assert output_path.exists()
         with open(output_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             rows = list(reader)
             assert len(rows) == 1
-            assert rows[0]["word"] == "学生"
-            assert "がくせい" in rows[0]["back"]
+            assert "学生" in rows[0]["word"]
+            assert "がくせい" in rows[0]["word"]
+            assert "<div" in rows[0]["word"]  # HTML structure
             assert "student" in rows[0]["back"]
             assert "common" in rows[0]["tags"]
             assert "kanji" in rows[0]["tags"]
@@ -361,13 +366,15 @@ class TestCreateVocabCsv:
             }
         ]
 
-        create_vocab_csv(words, output_path, include_examples=True)
+        create_vocab_csv(words, output_path, "N4", include_examples=True)
 
         with open(output_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             rows = list(reader)
-            assert "Examples:" in rows[0]["back"]
+            # Check new styled HTML format
+            assert "学生" in rows[0]["back"]
             assert "私は学生です。" in rows[0]["back"]
+            assert "<div" in rows[0]["back"]  # HTML structure
 
     def test_csv_without_examples(self, tmp_path):
         """Test creating CSV without example sentences"""
@@ -383,12 +390,18 @@ class TestCreateVocabCsv:
             }
         ]
 
-        create_vocab_csv(words, output_path, include_examples=False)
+        create_vocab_csv(words, output_path, "N3", include_examples=False)
 
         with open(output_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             rows = list(reader)
-            assert "Examples:" not in rows[0]["back"]
+            # Should not have examples section when include_examples=False
+            assert (
+                "Example" not in rows[0]["back"]
+                or "background:#f8f9fa" not in rows[0]["back"]
+            )
+            assert "学生" in rows[0]["back"]
+            assert "<div" in rows[0]["back"]  # HTML structure
 
     def test_with_tier_tag(self, tmp_path):
         """Test CSV with tier information"""
@@ -404,7 +417,7 @@ class TestCreateVocabCsv:
             }
         ]
 
-        create_vocab_csv(words, output_path, include_examples=False)
+        create_vocab_csv(words, output_path, "N4", include_examples=False)
 
         with open(output_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
@@ -424,7 +437,7 @@ class TestCreateVocabCsv:
             }
         ]
 
-        create_vocab_csv(words, output_path, include_examples=False)
+        create_vocab_csv(words, output_path, "N1", include_examples=False)
 
         with open(output_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)

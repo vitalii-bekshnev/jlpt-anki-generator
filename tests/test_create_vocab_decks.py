@@ -38,8 +38,9 @@ class TestCreateVocabCsv:
             reader = csv.DictReader(f)
             rows = list(reader)
             assert len(rows) == 1
-            assert rows[0]["word"] == "学生"
-            assert "がくせい" in rows[0]["back"]
+            assert "学生" in rows[0]["word"]
+            assert "がくせい" in rows[0]["word"]
+            assert "<div" in rows[0]["word"]  # HTML structure
             assert "student" in rows[0]["back"]
             assert "N5" in rows[0]["tags"]
             assert "common" in rows[0]["tags"]
@@ -63,8 +64,10 @@ class TestCreateVocabCsv:
         with open(output_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             rows = list(reader)
-            assert "Examples:" in rows[0]["back"]
+            # Check new styled HTML format
+            assert "学生" in rows[0]["back"]
             assert "私は学生です。" in rows[0]["back"]
+            assert "<div" in rows[0]["back"]  # HTML structure
 
     def test_csv_without_examples(self, tmp_path):
         """Test creating CSV without example sentences"""
@@ -85,7 +88,13 @@ class TestCreateVocabCsv:
         with open(output_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             rows = list(reader)
-            assert "Examples:" not in rows[0]["back"]
+            # Should not have examples section when include_examples=False
+            assert (
+                "Example" not in rows[0]["back"]
+                or "background:#f8f9fa" not in rows[0]["back"]
+            )
+            assert "学生" in rows[0]["back"]
+            assert "<div" in rows[0]["back"]  # HTML structure
 
     def test_multiple_words(self, tmp_path):
         """Test CSV with multiple words"""
@@ -113,8 +122,12 @@ class TestCreateVocabCsv:
             reader = csv.DictReader(f)
             rows = list(reader)
             assert len(rows) == 2
-            assert rows[0]["word"] == "学生"
-            assert rows[1]["word"] == "先生"
+            assert "学生" in rows[0]["word"]
+            assert "がくせい" in rows[0]["word"]
+            assert "先生" in rows[1]["word"]
+            assert "せんせい" in rows[1]["word"]
+            assert "<div" in rows[0]["word"]  # HTML structure
+            assert "<div" in rows[1]["word"]  # HTML structure
 
     def test_kana_only_word_tags(self, tmp_path):
         """Test tags for kana-only words"""

@@ -50,9 +50,11 @@ Thumbs.db
 
 # Generated Anki decks (keep source files)
 anki_decks/
+anki_decks_general/
 anki_vocab_jlpt/
 anki_vocab_jlpt_examples/
 tiered_decks/
+decks/
 *.csv
 
 # JMdict data files (download separately)

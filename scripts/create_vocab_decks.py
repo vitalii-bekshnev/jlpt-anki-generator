@@ -24,31 +24,34 @@ from jmdict_utils import (
     get_word_frequency_tier,
     process_word,
 )
+from card_templates import create_vocab_card, create_vocab_front
 
 
 def create_vocab_csv(
     words: List[Dict], output_path: Path, jlpt_tier: str, include_examples: bool = False
 ) -> None:
-    """Create Anki-compatible CSV file"""
+    """Create Anki-compatible CSV file with styled HTML"""
     fieldnames = ["word", "back", "tags"]
 
     output_rows = []
     for word in words:
-        back_parts = []
+        # Create styled front field
+        front = create_vocab_front(
+            word=word["word"],
+            readings=word.get("readings", ""),
+            jlpt_level=jlpt_tier,
+        )
 
-        # Readings
-        if word.get("readings"):
-            back_parts.append(f"<b>Reading:</b> {word['readings']}")
-
-        # Meanings
-        if word.get("senses"):
-            back_parts.append(f"<b>Meanings:</b><br>{word['senses']}")
-
-        # Examples (if included)
-        if include_examples and word.get("examples"):
-            back_parts.append(f"<b>Examples:</b><br>{word['examples']}")
-
-        back = "<br><br>".join(back_parts)
+        # Use new styled HTML template for back
+        back = create_vocab_card(
+            word=word["word"],
+            readings=word.get("readings", ""),
+            meanings=word.get("senses", ""),
+            examples=word.get("examples") if include_examples else None,
+            jlpt_level=jlpt_tier,
+            is_common=word.get("is_common", False),
+            tier=word.get("tier"),
+        )
 
         # Tags
         tags_list = [jlpt_tier]
@@ -59,7 +62,7 @@ def create_vocab_csv(
         if word.get("tier"):
             tags_list.append(f"freq_tier{word['tier']}")
 
-        row = {"word": word["word"], "back": back, "tags": " ".join(tags_list)}
+        row = {"word": front, "back": back, "tags": " ".join(tags_list)}
         output_rows.append(row)
 
     with open(output_path, "w", newline="", encoding="utf-8") as f:

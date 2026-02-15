@@ -1,6 +1,13 @@
-# JLPT Anki Decks
+# JLPT Anki Generator
 
-Pre-built Anki flashcard decks for JLPT (Japanese Language Proficiency Test) kanji and vocabulary, generated from the [jmdict-simplified](https://github.com/scriptin/jmdict-simplified) project.
+A Python-based generator that creates Anki flashcard decks for JLPT (Japanese Language Proficiency Test) kanji and vocabulary from dictionary sources. This tool automatically builds decks from the [jmdict-simplified](https://github.com/scriptin/jmdict-simplified) JSON dictionaries, allowing you to:
+
+- **Generate fresh decks** anytime dictionary data is updated
+- **Customize output** (include examples, filter by common words, etc.)
+- **Rebuild decks** with your own modifications to the Python scripts
+- **Stay current** with the latest JMdict/Kanjidic releases
+
+Pre-built decks are included in the `decks/` directory for immediate use, but the real power is in the generator scripts.
 
 ## 📦 Contents
 
@@ -72,8 +79,8 @@ Pre-built Anki flashcard decks for JLPT (Japanese Language Proficiency Test) kan
 
 ```bash
 # Clone this repo
-git clone <repo-url>
-cd jlpt_anki
+git clone https://github.com/<username>/jlpt-anki-generator.git
+cd jlpt-anki-generator
 
 # Place the JSON files in the scripts/ directory or reference them by path
 ```
@@ -111,15 +118,25 @@ python scripts/create_vocab_decks.py \
   -o my_output_dir/
 ```
 
+## 🔄 Updating Decks
+
+When new versions of JMdict or Kanjidic are released, simply:
+
+1. Download the new JSON files from [jmdict-simplified releases](https://github.com/scriptin/jmdict-simplified/releases)
+2. Re-run the generator scripts (see commands above)
+3. New decks will be created with updated dictionary data
+
+This ensures your Anki decks always contain the most current definitions, readings, and example sentences.
+
 ## 📁 Directory Structure
 
 ```
-jlpt_anki/
+jlpt-anki-generator/
 ├── README.md
 ├── scripts/
 │   ├── jmdict_utils.py          # Shared utilities (don't run directly)
-│   ├── create_kanji_decks.py    # Kanji deck generator
-│   └── create_vocab_decks.py    # Vocabulary deck generator
+│   ├── create_kanji_decks.py    # Kanji deck generator script
+│   └── create_vocab_decks.py    # Vocabulary deck generator script
 └── decks/
     ├── kanji/
     │   ├── jlpt_N5_kanji.csv
@@ -205,10 +222,12 @@ All derived files are distributed under the same licenses as required by the ori
 
 ## 🤝 Contributing
 
-These decks are generated automatically. To contribute improvements:
-1. Edit the Python scripts in `scripts/`
-2. Regenerate the decks
-3. Submit a pull request
+This is a code-first project. To contribute improvements:
+1. Edit the Python generator scripts in `scripts/`
+2. Regenerate the decks with your changes
+3. Submit a pull request with both script changes and updated decks
+
+Issues and feature requests for the generator scripts are welcome!
 
 ## 🐛 Troubleshooting
 

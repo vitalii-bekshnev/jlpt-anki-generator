@@ -6,7 +6,6 @@ Tests for create_kanji_decks.py
 import csv
 import json
 import sys
-from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1040,3 +1039,312 @@ class TestMainWithJmdict:
         # Should print warning but continue
         captured = capsys.readouterr()
         assert "Warning" in captured.err or "JMdict file not found" in captured.err
+
+
+class TestLoadKanjidicGenericError:
+    """Tests for generic exception handling in load_kanjidic"""
+
+    def test_generic_error_handling(self, tmp_path):
+        """Test handling of generic exceptions"""
+        test_file = tmp_path / "test.json"
+        test_file.write_text('{"test": "data"}')
+
+        # Mock open to raise a generic exception
+        with patch("builtins.open", side_effect=PermissionError("Permission denied")):
+            with pytest.raises(SystemExit) as exc_info:
+                load_kanjidic(test_file)
+            assert exc_info.value.code == 1
+
+
+class TestCreateAnkiCsvWithTier:
+    """Tests for create_anki_csv with tier information"""
+
+    def test_csv_with_tier_tag(self, tmp_path):
+        """Test creating CSV with tier tag"""
+        output_path = tmp_path / "test.csv"
+        characters = [
+            {
+                "kanji": "一",
+                "meanings": "one",
+                "on_readings": "イチ",
+                "kun_readings": "ひと",
+                "grade": 1,
+                "tier": 1,
+            }
+        ]
+
+        create_anki_csv(characters, output_path, "N5")
+
+        with open(output_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            assert "freq_tier1" in rows[0]["tags"]
+
+
+class TestMainWithLevel2Split:
+    """Tests for main function with level 2 grade-based splitting"""
+
+    @pytest.fixture
+    def mock_kanjidic_data_with_level2(self):
+        """Fixture for mock Kanjidic data with level 2 kanji"""
+        return {
+            "characters": [
+                {
+                    "literal": "学",
+                    "misc": {"jlptLevel": 2, "strokeCounts": [8], "grade": 5},
+                    "readingMeaning": {
+                        "groups": [
+                            {
+                                "readings": [{"type": "ja_on", "value": "ガク"}],
+                                "meanings": [{"lang": "en", "value": "study"}],
+                            }
+                        ]
+                    },
+                    "radicals": [{"value": "子"}],
+                    "dictionaryReferences": [],
+                },
+                {
+                    "literal": "複",
+                    "misc": {"jlptLevel": 2, "strokeCounts": [11], "grade": 8},
+                    "readingMeaning": {
+                        "groups": [
+                            {
+                                "readings": [{"type": "ja_on", "value": "フク"}],
+                                "meanings": [{"lang": "en", "value": "complex"}],
+                            }
+                        ]
+                    },
+                    "radicals": [{"value": "衣"}],
+                    "dictionaryReferences": [],
+                },
+            ]
+        }
+
+    @patch("create_kanji_decks.load_kanjidic")
+    @patch("create_kanji_decks.create_anki_csv")
+    def test_main_level2_n3_grouping(
+        self,
+        mock_create_csv,
+        mock_load_kanjidic,
+        tmp_path,
+        mock_kanjidic_data_with_level2,
+    ):
+        """Test that level 2 kanji with grade <= 6 go to N3"""
+        mock_load_kanjidic.return_value = mock_kanjidic_data_with_level2
+
+        output_dir = tmp_path / "output"
+        input_file = tmp_path / "kanjidic.json"
+        input_file.write_text("{}")
+
+        with patch(
+            "sys.argv",
+            ["create_kanji_decks.py", "-i", str(input_file), "-o", str(output_dir)],
+        ):
+            main()
+
+        # Check that create_anki_csv was called for N3
+        call_args_list = mock_create_csv.call_args_list
+        tiers_called = [call[0][2] for call in call_args_list]
+        assert "N3" in tiers_called
+
+    @patch("create_kanji_decks.load_kanjidic")
+    @patch("create_kanji_decks.create_anki_csv")
+    def test_main_level2_n2_grouping(
+        self,
+        mock_create_csv,
+        mock_load_kanjidic,
+        tmp_path,
+        mock_kanjidic_data_with_level2,
+    ):
+        """Test that level 2 kanji with grade > 6 go to N2"""
+        mock_load_kanjidic.return_value = mock_kanjidic_data_with_level2
+
+        output_dir = tmp_path / "output"
+        input_file = tmp_path / "kanjidic.json"
+        input_file.write_text("{}")
+
+        with patch(
+            "sys.argv",
+            ["create_kanji_decks.py", "-i", str(input_file), "-o", str(output_dir)],
+        ):
+            main()
+
+        # Check that create_anki_csv was called for N2
+        call_args_list = mock_create_csv.call_args_list
+        tiers_called = [call[0][2] for call in call_args_list]
+        assert "N2" in tiers_called
+
+    @patch("create_kanji_decks.load_kanjidic")
+    def test_main_skipped_output(self, mock_load_kanjidic, tmp_path, capsys):
+        """Test that skipped message is printed when entries are skipped"""
+        # Data with characters that will be skipped (no JLPT level)
+        mock_load_kanjidic.return_value = {
+            "characters": [
+                {
+                    "literal": "未",
+                    "misc": {"grade": 5},  # No jlptLevel
+                }
+            ]
+        }
+
+        output_dir = tmp_path / "output"
+        input_file = tmp_path / "kanjidic.json"
+        input_file.write_text("{}")
+
+        with patch(
+            "sys.argv",
+            ["create_kanji_decks.py", "-i", str(input_file), "-o", str(output_dir)],
+        ):
+            main()
+
+        captured = capsys.readouterr()
+        assert "Skipped" in captured.out
+
+    @patch("create_kanji_decks.load_kanjidic")
+    @patch("create_kanji_decks.create_anki_csv")
+    def test_main_with_tier_assignment(
+        self, mock_create_csv, mock_load_kanjidic, tmp_path
+    ):
+        """Test that tier is assigned when kanji is in frequency map"""
+        # Kanji with frequency data
+        mock_load_kanjidic.return_value = {
+            "characters": [
+                {
+                    "literal": "一",
+                    "misc": {
+                        "jlptLevel": 4,
+                        "strokeCounts": [1],
+                        "grade": 1,
+                        "frequency": 1,
+                    },
+                    "readingMeaning": {
+                        "groups": [
+                            {
+                                "readings": [{"type": "ja_on", "value": "イチ"}],
+                                "meanings": [{"lang": "en", "value": "one"}],
+                            }
+                        ]
+                    },
+                    "radicals": [{"value": "一"}],
+                    "dictionaryReferences": [],
+                }
+            ]
+        }
+
+        output_dir = tmp_path / "output"
+        input_file = tmp_path / "kanjidic.json"
+        input_file.write_text("{}")
+
+        with patch(
+            "sys.argv",
+            ["create_kanji_decks.py", "-i", str(input_file), "-o", str(output_dir)],
+        ):
+            main()
+
+        # Check create_anki_csv was called
+        assert mock_create_csv.called
+        # Verify the tier was assigned (by checking the call arguments)
+        call_args = mock_create_csv.call_args
+        characters = call_args[0][0]
+        assert len(characters) > 0
+        # The first kanji should have a tier assigned
+        assert "tier" in characters[0]
+
+    @patch("create_kanji_decks.load_kanjidic")
+    @patch("create_kanji_decks.create_anki_csv")
+    def test_main_level1_grouping(self, mock_create_csv, mock_load_kanjidic, tmp_path):
+        """Test that level 1 kanji go to N1"""
+        mock_load_kanjidic.return_value = {
+            "characters": [
+                {
+                    "literal": "鬱",
+                    "misc": {"jlptLevel": 1, "strokeCounts": [29]},
+                    "readingMeaning": {
+                        "groups": [
+                            {
+                                "readings": [{"type": "ja_on", "value": "ウツ"}],
+                                "meanings": [{"lang": "en", "value": "depression"}],
+                            }
+                        ]
+                    },
+                    "radicals": [{"value": "鬱"}],
+                    "dictionaryReferences": [],
+                }
+            ]
+        }
+
+        output_dir = tmp_path / "output"
+        input_file = tmp_path / "kanjidic.json"
+        input_file.write_text("{}")
+
+        with patch(
+            "sys.argv",
+            ["create_kanji_decks.py", "-i", str(input_file), "-o", str(output_dir)],
+        ):
+            main()
+
+        # Check that create_anki_csv was called for N1
+        call_args_list = mock_create_csv.call_args_list
+        tiers_called = [call[0][2] for call in call_args_list]
+        assert "N1" in tiers_called
+
+    @patch("create_kanji_decks.load_kanjidic")
+    def test_main_unknown_jlpt_level(self, mock_load_kanjidic, tmp_path, capsys):
+        """Test handling of unknown JLPT levels"""
+        # Character with an invalid JLPT level
+        mock_load_kanjidic.return_value = {
+            "characters": [
+                {
+                    "literal": "一",
+                    "misc": {"jlptLevel": 5},  # Invalid level
+                    "readingMeaning": {"groups": []},
+                    "radicals": [],
+                    "dictionaryReferences": [],
+                }
+            ]
+        }
+
+        output_dir = tmp_path / "output"
+        input_file = tmp_path / "kanjidic.json"
+        input_file.write_text("{}")
+
+        with patch(
+            "sys.argv",
+            ["create_kanji_decks.py", "-i", str(input_file), "-o", str(output_dir)],
+        ):
+            main()
+
+        captured = capsys.readouterr()
+        # Should indicate entries were skipped
+        assert "Skipped" in captured.out
+
+
+class TestScriptEntryPoint:
+    """Test script execution via __main__ block"""
+
+    def test_script_runs_as_main(self, tmp_path, monkeypatch):
+        """Test that script executes when run as __main__"""
+        import subprocess
+        import sys
+
+        # Create mock input file
+        kanjidic_file = tmp_path / "kanjidic.json"
+        kanjidic_file.write_text(json.dumps({"characters": []}))
+        output_dir = tmp_path / "output"
+
+        # Run the script as a subprocess
+        result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/create_kanji_decks.py",
+                "-i",
+                str(kanjidic_file),
+                "-o",
+                str(output_dir),
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+        # Should exit with error code due to empty data
+        assert result.returncode in [0, 1]

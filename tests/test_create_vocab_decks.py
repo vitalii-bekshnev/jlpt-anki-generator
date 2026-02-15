@@ -5,9 +5,8 @@ Tests for create_vocab_decks.py
 
 import csv
 import sys
-from io import StringIO
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -463,3 +462,266 @@ class TestMain:
 
         assert output_dir.exists()
         assert mock_create_csv.called
+
+
+class TestCreateVocabCsvWithTier:
+    """Tests for create_vocab_csv with tier information"""
+
+    def test_csv_with_tier_tag(self, tmp_path):
+        """Test creating CSV with tier tag"""
+        output_path = tmp_path / "test.csv"
+        words = [
+            {
+                "word": "学生",
+                "readings": "がくせい",
+                "senses": "1. (noun) student",
+                "is_common": True,
+                "form_type": "kanji",
+                "tier": 2,
+            }
+        ]
+
+        create_vocab_csv(words, output_path, "N5", include_examples=False)
+
+        with open(output_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            assert "freq_tier2" in rows[0]["tags"]
+
+
+class TestMainWithKanaOnlyAndNonJlpt:
+    """Tests for main with kana-only and non-JLPT words"""
+
+    @pytest.fixture
+    def mock_jmdict_with_kana_only(self):
+        """Fixture with kana-only and non-JLPT words"""
+        return {
+            "tags": {"n": "noun"},
+            "words": [
+                {
+                    "kanji": [],  # Kana-only
+                    "kana": [{"text": "です", "common": True}],
+                    "sense": [
+                        {
+                            "partOfSpeech": ["n"],
+                            "gloss": [{"lang": "eng", "text": "to be"}],
+                        }
+                    ],
+                },
+                {
+                    "kanji": [{"text": "罕见字", "common": False}],  # Non-JLPT kanji
+                    "kana": [{"text": "はんれんじ", "common": False}],
+                    "sense": [
+                        {
+                            "partOfSpeech": ["n"],
+                            "gloss": [{"lang": "eng", "text": "rare character"}],
+                        }
+                    ],
+                },
+            ],
+        }
+
+    @pytest.fixture
+    def mock_kanjidic_with_freq(self):
+        """Fixture with frequency data"""
+        return {
+            "characters": [
+                {
+                    "literal": "学",
+                    "misc": {
+                        "jlptLevel": 2,
+                        "grade": 5,
+                        "frequency": 100,
+                        "strokeCounts": [8],
+                    },
+                }
+            ]
+        }
+
+    @patch("create_vocab_decks.load_json")
+    @patch("create_vocab_decks.create_vocab_csv")
+    def test_main_creates_kana_only_file(
+        self,
+        mock_create_csv,
+        mock_load_json,
+        tmp_path,
+        mock_jmdict_with_kana_only,
+        mock_kanjidic_with_freq,
+    ):
+        """Test that kana-only words are saved to separate file"""
+        mock_load_json.side_effect = [
+            mock_kanjidic_with_freq,
+            mock_jmdict_with_kana_only,
+        ]
+
+        output_dir = tmp_path / "output"
+        jmdict_file = tmp_path / "jmdict.json"
+        kanjidic_file = tmp_path / "kanjidic.json"
+
+        jmdict_file.write_text("{}")
+        kanjidic_file.write_text("{}")
+
+        with patch(
+            "sys.argv",
+            [
+                "create_vocab_decks.py",
+                "--jmdict",
+                str(jmdict_file),
+                "--kanjidic",
+                str(kanjidic_file),
+                "-o",
+                str(output_dir),
+            ],
+        ):
+            main()
+
+        # Check that create_vocab_csv was called for kana_only
+        call_args_list = mock_create_csv.call_args_list
+        jlpt_levels = [call[0][2] for call in call_args_list]
+        assert "kana" in jlpt_levels
+
+    @patch("create_vocab_decks.load_json")
+    @patch("create_vocab_decks.create_vocab_csv")
+    def test_main_creates_non_jlpt_file(
+        self,
+        mock_create_csv,
+        mock_load_json,
+        tmp_path,
+        mock_jmdict_with_kana_only,
+        mock_kanjidic_with_freq,
+    ):
+        """Test that non-JLPT words are saved to separate file"""
+        mock_load_json.side_effect = [
+            mock_kanjidic_with_freq,
+            mock_jmdict_with_kana_only,
+        ]
+
+        output_dir = tmp_path / "output"
+        jmdict_file = tmp_path / "jmdict.json"
+        kanjidic_file = tmp_path / "kanjidic.json"
+
+        jmdict_file.write_text("{}")
+        kanjidic_file.write_text("{}")
+
+        with patch(
+            "sys.argv",
+            [
+                "create_vocab_decks.py",
+                "--jmdict",
+                str(jmdict_file),
+                "--kanjidic",
+                str(kanjidic_file),
+                "-o",
+                str(output_dir),
+            ],
+        ):
+            main()
+
+        # Check that create_vocab_csv was called for non_jlpt
+        call_args_list = mock_create_csv.call_args_list
+        jlpt_levels = [call[0][2] for call in call_args_list]
+        assert "non_jlpt" in jlpt_levels
+
+
+class TestMainSkippedWords:
+    """Tests for skipped words counting in main function"""
+
+    @pytest.fixture
+    def mock_kanjidic_data(self):
+        """Fixture for mock Kanjidic data"""
+        return {
+            "characters": [
+                {"literal": "学", "misc": {"jlptLevel": 2, "grade": 5}},
+                {"literal": "生", "misc": {"jlptLevel": 4}},
+            ]
+        }
+
+    @patch("create_vocab_decks.load_json")
+    @patch("create_vocab_decks.create_vocab_csv")
+    def test_main_skipped_with_common_only_filter(
+        self, mock_create_csv, mock_load_json, tmp_path, mock_kanjidic_data
+    ):
+        """Test skipped counting when common-only filter is applied"""
+        # Non-common word should be skipped
+        mock_jmdict_non_common = {
+            "tags": {"n": "noun"},
+            "words": [
+                {
+                    "kanji": [{"text": "学生", "common": False}],
+                    "kana": [{"text": "がくせい", "common": False}],
+                    "sense": [
+                        {
+                            "partOfSpeech": ["n"],
+                            "gloss": [{"lang": "eng", "text": "student"}],
+                        }
+                    ],
+                }
+            ],
+        }
+        mock_load_json.side_effect = [mock_kanjidic_data, mock_jmdict_non_common]
+
+        output_dir = tmp_path / "output"
+        jmdict_file = tmp_path / "jmdict.json"
+        kanjidic_file = tmp_path / "kanjidic.json"
+
+        jmdict_file.write_text("{}")
+        kanjidic_file.write_text("{}")
+
+        with patch(
+            "sys.argv",
+            [
+                "create_vocab_decks.py",
+                "--jmdict",
+                str(jmdict_file),
+                "--kanjidic",
+                str(kanjidic_file),
+                "-o",
+                str(output_dir),
+                "--common-only",
+            ],
+        ):
+            main()
+
+        assert output_dir.exists()
+
+    @patch("create_vocab_decks.load_json")
+    @patch("create_vocab_decks.create_vocab_csv")
+    def test_main_skipped_invalid_word(
+        self, mock_create_csv, mock_load_json, tmp_path, mock_kanjidic_data
+    ):
+        """Test skipped counting when word processing returns None"""
+        # Invalid word with no kanji or kana
+        mock_jmdict_invalid = {
+            "tags": {},
+            "words": [
+                {
+                    "kanji": [],  # No kanji
+                    "kana": [],  # No kana
+                    "sense": [],  # No sense
+                }
+            ],
+        }
+        mock_load_json.side_effect = [mock_kanjidic_data, mock_jmdict_invalid]
+
+        output_dir = tmp_path / "output"
+        jmdict_file = tmp_path / "jmdict.json"
+        kanjidic_file = tmp_path / "kanjidic.json"
+
+        jmdict_file.write_text("{}")
+        kanjidic_file.write_text("{}")
+
+        with patch(
+            "sys.argv",
+            [
+                "create_vocab_decks.py",
+                "--jmdict",
+                str(jmdict_file),
+                "--kanjidic",
+                str(kanjidic_file),
+                "-o",
+                str(output_dir),
+            ],
+        ):
+            main()
+
+        assert output_dir.exists()

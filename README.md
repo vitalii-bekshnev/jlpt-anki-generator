@@ -191,39 +191,71 @@ For developers and advanced users who want to customize or contribute.
 jlpt-anki-generator/
 ├── scripts/
 │   ├── create_kanji_decks.py      # Kanji deck generator
-│   ├── create_vocab_decks.py      # Vocabulary deck generator
+│   ├── create_vocab_decks.py      # Vocabulary deck generator  
 │   ├── create_tiered_decks.py     # Tiered/frequency-based decks
-│   └── jmdict_utils.py            # Shared utilities
+│   ├── jmdict_utils.py            # Shared utilities for JMdict processing
+│   └── card_templates.py          # HTML/CSS card formatting templates
+├── tests/
+│   ├── test_create_kanji_decks.py # Unit tests for kanji generation
+│   ├── test_create_vocab_decks.py # Unit tests for vocab generation
+│   ├── test_create_tiered_decks.py# Unit tests for tiered decks
+│   └── test_jmdict_utils.py       # Unit tests for utilities
 ├── .github/workflows/
+│   ├── test.yml                   # CI/CD for testing and linting
 │   └── build-and-release.yml      # Automated release workflow
+├── generate_general_decks.sh      # Shell wrapper for general decks
+├── generate_tiered_decks.sh       # Shell wrapper for tiered decks
+├── pytest.ini                     # Test configuration
 └── decks/                         # Generated decks (output)
 ```
 
-### Automated Workflow
+### Automated Workflows
 
-The `.github/workflows/build-and-release.yml` file defines a GitHub Actions workflow that:
+#### 1. Test Workflow (`test.yml`)
 
+Runs on every push and pull request:
+- **Tests**: Runs pytest across Python 3.10, 3.11, 3.12 with coverage reporting
+- **Linting**: Black formatting and Ruff linting checks
+- **Coverage**: Uploads to Codecov (currently **99% coverage**)
+
+#### 2. Build and Release Workflow (`build-and-release.yml`)
+
+Complete CI/CD pipeline that:
 1. Fetches the latest dictionary release from [jmdict-simplified](https://github.com/scriptin/jmdict-simplified)
-2. Downloads the required JSON files (kanjidic2, JMdict, examples)
-3. Generates kanji decks using `create_kanji_decks.py`
-4. Generates vocabulary decks using `create_vocab_decks.py`
-5. Generates tiered decks using `create_tiered_decks.py`
-6. Creates tar.gz and zip archives for each deck type
-7. Publishes a GitHub release with all archives
+2. Downloads and caches JSON files (kanjidic2, JMdict, examples)
+3. Generates all deck types using shell scripts
+4. **Validates generated CSVs** (verifies file count, example sentences, example words)
+5. Creates tar.gz and zip archives for each deck
+6. Verifies archive integrity
+7. Generates release notes
+8. Publishes GitHub release with artifacts
 
 **Triggers:**
 - Monthly (1st of each month via cron)
 - Manual trigger (workflow_dispatch)
-- Push to main/master (when workflow file changes)
+- Push to main/master (when workflow/scripts change)
 
 ### Prerequisites for Local Generation
 
-- Python 3.7+
+- Python 3.10+ (tested on 3.10, 3.11, 3.12)
 - JSON dictionary files from [jmdict-simplified releases](https://github.com/scriptin/jmdict-simplified/releases)
 
-### Script Options
+### Running Tests
 
-All deck generation is handled by shell scripts that wrap the Python scripts:
+The project has comprehensive test coverage (99%) with 223 tests:
+
+```bash
+# Run all tests with coverage
+pytest --cov=scripts --cov-report=term-missing
+
+# Run specific test file
+pytest tests/test_jmdict_utils.py -v
+
+# Run with verbose output
+pytest -v
+```
+
+### Script Options
 
 **General Decks (by JLPT level only):**
 ```bash
@@ -246,59 +278,76 @@ Generates decks organized by both JLPT level and frequency tier (Tier 1-4).
 ./generate_tiered_decks.sh -o my_decks/
 
 # Exclude example sentences
-./generate_general_decks.sh --no-examples
 ./generate_tiered_decks.sh --no-examples
 
 # Only common words (tiered only)
 ./generate_tiered_decks.sh --common-only
 
-# Tier calculation strategy (tiered only): conservative, average, or first
-./generate_tiered_decks.sh --tier-strategy average
+# Tier calculation strategy (tiered only)
+./generate_tiered_decks.sh --tier-strategy average  # conservative, average, first
 ```
 
-For advanced customization, you can run the Python scripts directly:
+### Direct Python Usage
+
+For advanced customization, run Python scripts directly:
 
 ```bash
-# Direct Python usage for kanji decks
-python scripts/create_kanji_decks.py -i input.json -o output_dir/
+# Kanji decks
+python scripts/create_kanji_decks.py \
+  --input kanjidic2-en-3.6.2.json \
+  --jmdict jmdict-eng-3.6.2.json \
+  --max-examples 3 \
+  --output-dir my_decks/
 
-# Direct Python usage for vocabulary decks
+# Vocabulary decks  
 python scripts/create_vocab_decks.py \
-  --jmdict path/to/jmdict.json \
-  --jmdict-examples path/to/examples.json \
-  --kanjidic path/to/kanjidic.json \
+  --jmdict jmdict-eng-3.6.2.json \
+  --jmdict-examples jmdict-examples-eng-3.6.2.json \
+  --kanjidic kanjidic2-en-3.6.2.json \
   --output-dir my_decks/ \
-  --examples          # Include example sentences
-  --common-only       # Only common words
+  --examples \
+  --common-only
 
-# Direct Python usage for tiered decks
+# Tiered decks
 python scripts/create_tiered_decks.py \
-  --jmdict path/to/jmdict.json \
-  --jmdict-examples path/to/examples.json \
-  --kanjidic path/to/kanjidic.json \
-  --output-dir tiered_decks/
+  --jmdict jmdict-eng-3.6.2.json \
+  --jmdict-examples jmdict-examples-eng-3.6.2.json \
+  --kanjidic kanjidic2-en-3.6.2.json \
+  --output-dir tiered_decks/ \
+  --tier-strategy conservative
 ```
 
 ### Customizing Output
 
-The CSV files use HTML formatting. You can customize appearance by:
-1. Editing the Python scripts to change field formatting
-2. Modifying Anki card templates after import
-3. Adding CSS to your Anki card styling
+**Card Templates:** The `card_templates.py` module contains HTML/CSS templates for formatting cards. You can modify:
+- HTML structure of card fields
+- CSS styling for kanji, readings, and examples
+- Template patterns for different deck types
 
-Example CSS:
+**CSS in Anki:** After importing, customize appearance via Anki's card styling:
 ```css
 .card {
   font-family: "Noto Sans JP", sans-serif;
+  font-size: 24px;
 }
-b { color: #0066cc; }
+.kanji { color: #333; font-size: 72px; }
+.reading { color: #0066cc; }
+.meaning { color: #666; }
 ```
 
 ### Contributing
 
 1. Fork the repository
-2. Make changes to the Python scripts
-3. Test by generating decks locally
-4. Submit a pull request
+2. Create a feature branch
+3. Make changes with tests
+4. Ensure tests pass: `pytest`
+5. Check formatting: `black scripts/ tests/` and `ruff check scripts/ tests/`
+6. Submit a pull request
+
+**Code Quality:**
+- 99% test coverage maintained
+- Black code formatting enforced
+- Ruff linting checks
+- Type hints encouraged
 
 Issues and feature requests welcome!
